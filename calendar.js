@@ -2,7 +2,8 @@ const ical = require('node-ical');
 const { google } = require('googleapis');
 const { getAuthedClient } = require('./auth');
 
-const ICAL_URL = 'https://calendar.google.com/calendar/ical/0mandrock1%40gmail.com/private-d889d3ab10f1171c0d9c9a6b3d2b65c3/basic.ics';
+const ICAL_URL = process.env.ICAL_URL;
+if (!ICAL_URL) throw new Error('ICAL_URL env var required (Google Calendar → Settings → your calendar → "Secret address in iCal format")');
 const CACHE_TTL = 60 * 1000;
 const CALENDAR_ID = 'primary';
 

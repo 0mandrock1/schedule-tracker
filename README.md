@@ -60,6 +60,7 @@ Google Calendar → Settings → your calendar → "Secret address in iCal forma
 |---|---|
 | `PORT` | HTTP port (default 3463) |
 | `SCHEDULE_PASSCODE` | Shared passcode gating all `/schedule-tracker-api/*` routes and the frontend. Empty disables the gate. |
+| `ICAL_URL` | Your calendar's private iCal address (Google Calendar → Settings → your calendar → "Secret address in iCal format"). Required — this URL embeds a secret token, never commit it. |
 
 ### Running
 
