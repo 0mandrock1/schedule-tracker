@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Schedule Tracker</title>
+<style>
+  :root{--bg:#0e0e0e;--card:#1a1a1a;--border:#2c2c2a;--text:#e8e6e0;--muted:#888780;--accent:#2bb3a3;--done:#2bb3a3;--red:#c04040}
+  *{box-sizing:border-box}
+  body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:0;padding:20px 14px 100px;max-width:760px;margin-inline:auto}
+  h1{font-size:20px;font-weight:500;margin:0 0 4px}
+  .sub{color:var(--muted);font-size:13px;margin:0 0 16px}
+  a{color:var(--accent)}
+
+  #gate{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;z-index:1000}
+  #gate input{background:var(--card);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:12px 14px;font-size:16px;text-align:center;width:200px}
+  #gate button{background:var(--accent);border:0;color:#04201c;font-weight:600;border-radius:8px;padding:10px 20px;font-size:14px;cursor:pointer}
+  #gate .err{color:var(--red);font-size:13px;min-height:16px}
+
+  .toolbar{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center}
+  .toolbar input[type=date]{background:var(--card);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:6px 8px;font-size:13px}
+  .tabs{display:flex;gap:6px;margin-bottom:16px}
+  .tab{background:var(--card);border:1px solid var(--border);color:var(--muted);border-radius:8px;padding:6px 14px;font-size:13px;cursor:pointer}
+  .tab.active{color:var(--text);border-color:var(--accent)}
+
+  .progress-wrap{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:16px}
+  .stats{display:flex;justify-content:space-between;font-size:13px;color:var(--muted)}
+  .progress-bar{height:8px;background:#2c2c2a;border-radius:4px;overflow:hidden;margin-top:8px}
+  .progress-fill{height:100%;background:var(--accent);transition:width .3s}
+
+  .day{margin-bottom:18px}
+  .day-title{font-size:14px;font-weight:500;margin-bottom:6px;color:var(--muted)}
+  .day-title.today{color:var(--accent)}
+  .slot{display:flex;align-items:center;gap:10px;padding:9px 10px;background:var(--card);border:1px solid var(--border);border-radius:8px;margin-bottom:5px}
+  .slot.done{opacity:.5}
+  .slot.done .label{text-decoration:line-through}
+  .slot.skipped{opacity:.5}
+  .slot.skipped .label{text-decoration:line-through;color:var(--red)}
+  .time{font-size:11px;color:var(--muted);min-width:80px}
+  .label{font-size:13px;flex:1}
+  .btn-row{display:flex;gap:4px;flex-shrink:0}
+  .ibtn{width:24px;height:24px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+  .ibtn.on.done{background:var(--done);border-color:var(--done);color:#04201c}
+  .ibtn.on.skip{background:var(--red);border-color:var(--red);color:#fff}
+  .markers{font-size:11px;color:var(--accent)}
+
+  #counter table{width:100%;border-collapse:collapse;font-size:13px}
+  #counter td,#counter th{padding:6px 4px;border-bottom:1px solid var(--border);text-align:left}
+
+  #pomo{position:fixed;bottom:14px;right:14px;left:14px;max-width:400px;margin-inline:auto;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px 16px;display:flex;align-items:center;gap:12px;font-size:14px}
+  #pomo .time-display{font-variant-numeric:tabular-nums;font-size:20px;min-width:64px}
+  #pomo button{background:var(--accent);border:0;color:#04201c;border-radius:8px;padding:8px 14px;font-size:13px;cursor:pointer;font-weight:600}
+  #pomo button.secondary{background:transparent;border:1px solid var(--border);color:var(--muted)}
+
+  @media (max-width:480px){
+    body{padding:14px 8px 110px}
+    .time{min-width:64px;font-size:10px}
+    .label{font-size:12px}
+  }
+</style>
+</head>
+<body>
+
+<div id="gate">
+  <h1>Schedule Tracker</h1>
+  <input id="passcode-input" type="password" placeholder="passcode" autofocus>
+  <button id="gate-submit">Увійти</button>
+  <div class="err" id="gate-err"></div>
+</div>
+
+<div id="app" style="display:none">
+  <h1>Schedule Tracker</h1>
+  <p class="sub">Google Calendar — джерело правди</p>
+
+  <div class="toolbar">
+    <input type="date" id="from-date">
+    <span style="color:var(--muted)">—</span>
+    <input type="date" id="to-date">
+  </div>
+
+  <div class="tabs">
+    <div class="tab active" data-tab="days">Дні</div>
+    <div class="tab" data-tab="counter">Лічильник</div>
+  </div>
+
+  <div class="progress-wrap">
+    <div class="stats"><span id="stat-text">0 / 0 виконано</span><span id="stat-pct">0%</span></div>
+    <div class="progress-bar"><div class="progress-fill" id="progress-fill" style="width:0%"></div></div>
+  </div>
+
+  <div id="days"></div>
+
+  <div id="counter" style="display:none">
+    <div class="progress-wrap">
+      <h3 style="margin-top:0">Живі дані (з поточного sqlite-кешу)</h3>
+      <table id="live-table"><thead><tr><th>Статус</th><th>К-сть</th></tr></thead><tbody></tbody></table>
+    </div>
+    <div class="progress-wrap">
+      <h3 style="margin-top:0">Legacy історія (до 2026-07-13)</h3>
+      <table id="legacy-table"><thead><tr><th>Статус</th><th>К-сть</th></tr></thead><tbody></tbody></table>
+    </div>
+  </div>
+</div>
+
+<div id="pomo" style="display:none">
+  <div class="time-display" id="pomo-time">25:00</div>
+  <button id="pomo-start">Старт</button>
+  <button class="secondary" id="pomo-stop" style="display:none">Стоп</button>
+</div>
+
+<script>
+const API = '/schedule-tracker-api';
+const DEFAULT_FROM = '2026-07-02';
+const DEFAULT_TO = '2026-08-31';
+const RANGE_KEY = 'st_range_v1';
+const PASS_KEY = 'st_passcode';
+
+function apiFetch(path, opts={}){
+  const passcode = sessionStorage.getItem(PASS_KEY) || '';
+  opts.headers = Object.assign({'x-passcode': passcode, 'Content-Type':'application/json'}, opts.headers||{});
+  return fetch(API+path, opts);
+}
+
+// ---- passcode gate ----
+async function tryPasscode(code){
+  sessionStorage.setItem(PASS_KEY, code);
+  const r = await apiFetch('/counter');
+  if(r.status === 401){ sessionStorage.removeItem(PASS_KEY); return false; }
+  return true;
+}
+
+document.getElementById('gate-submit').onclick = async () => {
+  const code = document.getElementById('passcode-input').value;
+  const ok = await tryPasscode(code);
+  if(ok){
+    document.getElementById('gate').style.display = 'none';
+    document.getElementById('app').style.display = '';
+    document.getElementById('pomo').style.display = 'flex';
+    init();
+  } else {
+    document.getElementById('gate-err').textContent = 'Невірний код';
+  }
+};
+document.getElementById('passcode-input').addEventListener('keydown', e=>{
+  if(e.key === 'Enter') document.getElementById('gate-submit').click();
+});
+
+(async function boot(){
+  const cached = sessionStorage.getItem(PASS_KEY);
+  if(cached !== null && await tryPasscode(cached)){
+    document.getElementById('gate').style.display = 'none';
+    document.getElementById('app').style.display = '';
+    document.getElementById('pomo').style.display = 'flex';
+    init();
+  }
+})();
+
+// ---- main app ----
+let calEvents = {};
+
+function loadRange(){
+  try{ return JSON.parse(localStorage.getItem(RANGE_KEY)) || { from: DEFAULT_FROM, to: DEFAULT_TO }; }
+  catch(e){ return { from: DEFAULT_FROM, to: DEFAULT_TO }; }
+}
+function saveRange(r){ localStorage.setItem(RANGE_KEY, JSON.stringify(r)); }
+
+function fmtDay(d){ return d.toLocaleDateString('uk-UA',{weekday:'short',day:'2-digit',month:'2-digit'}); }
+function fmtTime(iso){ return new Date(iso).toLocaleTimeString('uk-UA',{hour:'2-digit',minute:'2-digit',timeZone:'Europe/Kiev'}); }
+
+async function loadCalendar(){
+  const { from, to } = loadRange();
+  const r = await apiFetch(`/calendar?from=${from}&to=${to}`);
+  if(!r.ok) return;
+  calEvents = await r.json();
+  render();
+}
+
+async function setStatus(uid, start, status, btnEl){
+  await apiFetch('/status', { method:'POST', body: JSON.stringify({ uid, start, status }) });
+  await loadCalendar();
+}
+
+function render(){
+  const container = document.getElementById('days');
+  container.innerHTML = '';
+  const { from, to } = loadRange();
+  const today = new Date().toISOString().slice(0,10);
+  let total = 0, done = 0;
+
+  const dates = Object.keys(calEvents).sort();
+  for(const dateKey of dates){
+    const slots = calEvents[dateKey].slice().sort((a,b)=>a.startMin-b.startMin);
+    const dayDiv = document.createElement('div');
+    dayDiv.className = 'day';
+    const title = document.createElement('div');
+    title.className = 'day-title' + (dateKey===today ? ' today' : '');
+    title.textContent = fmtDay(new Date(dateKey+'T00:00:00'));
+    dayDiv.appendChild(title);
+
+    slots.forEach(ev => {
+      total++;
+      if(ev.status === 'done') done++;
+      const slotEl = document.createElement('div');
+      slotEl.className = 'slot' + (ev.status==='done'?' done':'') + (ev.status==='skipped'?' skipped':'');
+      const timeEl = document.createElement('div'); timeEl.className='time';
+      timeEl.textContent = fmtTime(ev.start) + '–' + fmtTime(ev.end);
+      const labelEl = document.createElement('div'); labelEl.className='label'; labelEl.textContent = ev.title;
+      const btnRow = document.createElement('div'); btnRow.className='btn-row';
+
+      const doneBtn = document.createElement('button');
+      doneBtn.className = 'ibtn' + (ev.status==='done' ? ' on done' : '');
+      doneBtn.textContent = '✓';
+      doneBtn.onclick = () => setStatus(ev.uid, ev.start, ev.status==='done' ? 'pending' : 'done');
+
+      const skipBtn = document.createElement('button');
+      skipBtn.className = 'ibtn' + (ev.status==='skipped' ? ' on skip' : '');
+      skipBtn.textContent = '✕';
+      skipBtn.onclick = () => setStatus(ev.uid, ev.start, ev.status==='skipped' ? 'pending' : 'skipped');
+
+      const pomoBtn = document.createElement('button');
+      pomoBtn.className = 'ibtn';
+      pomoBtn.textContent = '⏱';
+      pomoBtn.onclick = () => startPomodoro(ev.uid);
+
+      btnRow.append(doneBtn, skipBtn, pomoBtn);
+      slotEl.append(timeEl, labelEl, btnRow);
+      dayDiv.appendChild(slotEl);
+    });
+    container.appendChild(dayDiv);
+  }
+
+  document.getElementById('stat-text').textContent = `${done} / ${total} виконано`;
+  document.getElementById('stat-pct').textContent = total ? Math.round(done/total*100)+'%' : '0%';
+  document.getElementById('progress-fill').style.width = (total ? done/total*100 : 0)+'%';
+}
+
+async function loadCounter(){
+  const { from, to } = loadRange();
+  const r = await apiFetch(`/counter?from=${from}&to=${to}`);
+  const data = await r.json();
+  const liveBody = document.querySelector('#live-table tbody');
+  liveBody.innerHTML = data.live.map(row => `<tr><td>${row.status}</td><td>${row.n}</td></tr>`).join('') || '<tr><td colspan=2>—</td></tr>';
+  const legacyBody = document.querySelector('#legacy-table tbody');
+  legacyBody.innerHTML = data.legacy.map(row => `<tr><td>${row.status}</td><td>${row.n}</td></tr>`).join('') || '<tr><td colspan=2>—</td></tr>';
+}
+
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.onclick = () => {
+    document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+    tab.classList.add('active');
+    const isCounter = tab.dataset.tab === 'counter';
+    document.getElementById('days').style.display = isCounter ? 'none' : '';
+    document.querySelector('.progress-wrap').style.display = isCounter ? 'none' : '';
+    document.getElementById('counter').style.display = isCounter ? '' : 'none';
+    if(isCounter) loadCounter();
+  };
+});
+
+document.getElementById('from-date').onchange = e => { const r=loadRange(); r.from=e.target.value; saveRange(r); loadCalendar(); };
+document.getElementById('to-date').onchange = e => { const r=loadRange(); r.to=e.target.value; saveRange(r); loadCalendar(); };
+
+// ---- pomodoro ----
+let pomoState = { running:false, remaining:1500, timerId:null, currentPomoId:null };
+function updatePomoDisplay(){
+  const m = Math.floor(pomoState.remaining/60).toString().padStart(2,'0');
+  const s = (pomoState.remaining%60).toString().padStart(2,'0');
+  document.getElementById('pomo-time').textContent = `${m}:${s}`;
+}
+async function startPomodoro(uid){
+  if(pomoState.running) return;
+  const r = await apiFetch('/pomodoro/start', { method:'POST', body: JSON.stringify({ uid: uid||null }) });
+  const { id } = await r.json();
+  pomoState.currentPomoId = id;
+  pomoState.running = true;
+  pomoState.remaining = 1500;
+  document.getElementById('pomo-start').style.display = 'none';
+  document.getElementById('pomo-stop').style.display = '';
+  pomoState.timerId = setInterval(() => {
+    pomoState.remaining--;
+    updatePomoDisplay();
+    if(pomoState.remaining <= 0) finishPomodoro(true);
+  }, 1000);
+}
+async function finishPomodoro(completed){
+  clearInterval(pomoState.timerId);
+  if(pomoState.currentPomoId){
+    await apiFetch(`/pomodoro/${pomoState.currentPomoId}/finish`, { method:'POST', body: JSON.stringify({ completed }) });
+  }
+  pomoState = { running:false, remaining:1500, timerId:null, currentPomoId:null };
+  updatePomoDisplay();
+  document.getElementById('pomo-start').style.display = '';
+  document.getElementById('pomo-stop').style.display = 'none';
+}
+document.getElementById('pomo-start').onclick = () => startPomodoro(null);
+document.getElementById('pomo-stop').onclick = () => finishPomodoro(false);
+
+function init(){
+  const { from, to } = loadRange();
+  document.getElementById('from-date').value = from;
+  document.getElementById('to-date').value = to;
+  updatePomoDisplay();
+  loadCalendar();
+  setInterval(loadCalendar, 30000);
+}
+</script>
+</body>
+</html>
