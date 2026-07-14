@@ -43,6 +43,7 @@
   .ibtn.on.done{background:var(--done);border-color:var(--done);color:#04201c}
   .ibtn.on.skip{background:var(--red);border-color:var(--red);color:#fff}
   .markers{font-size:11px;color:var(--accent)}
+  .slot-err{font-size:11px;color:var(--red);white-space:nowrap}
 
   #counter table{width:100%;border-collapse:collapse;font-size:13px}
   #counter td,#counter th{padding:6px 4px;border-bottom:1px solid var(--border);text-align:left}
@@ -157,6 +158,8 @@ document.getElementById('passcode-input').addEventListener('keydown', e=>{
 
 // ---- main app ----
 let calEvents = {};
+let lastCalHash = null;
+const slotIndex = {}; // `${uid}|${start}` -> { ev, slotEl, doneBtn, skipBtn }
 
 function loadRange(){
   try{ return JSON.parse(localStorage.getItem(RANGE_KEY)) || { from: DEFAULT_FROM, to: DEFAULT_TO }; }
@@ -166,26 +169,76 @@ function saveRange(r){ localStorage.setItem(RANGE_KEY, JSON.stringify(r)); }
 
 function fmtDay(d){ return d.toLocaleDateString('uk-UA',{weekday:'short',day:'2-digit',month:'2-digit'}); }
 function fmtTime(iso){ return new Date(iso).toLocaleTimeString('uk-UA',{hour:'2-digit',minute:'2-digit',timeZone:'Europe/Kiev'}); }
+function slotKey(uid, start){ return uid + '|' + start; }
 
 async function loadCalendar(){
   const { from, to } = loadRange();
   const r = await apiFetch(`/calendar?from=${from}&to=${to}`);
   if(!r.ok) return;
-  calEvents = await r.json();
+  const data = await r.json();
+  const hash = JSON.stringify(data);
+  if(hash === lastCalHash) return; // server state matches what's already on screen — skip DOM rebuild
+  lastCalHash = hash;
+  calEvents = data;
   render();
 }
 
-async function setStatus(uid, start, status, btnEl){
-  await apiFetch('/status', { method:'POST', body: JSON.stringify({ uid, start, status }) });
-  await loadCalendar();
+function applySlotVisual(entry){
+  const { ev, slotEl, doneBtn, skipBtn } = entry;
+  slotEl.className = 'slot' + (ev.status==='done'?' done':'') + (ev.status==='skipped'?' skipped':'');
+  doneBtn.className = 'ibtn' + (ev.status==='done' ? ' on done' : '');
+  skipBtn.className = 'ibtn' + (ev.status==='skipped' ? ' on skip' : '');
+}
+
+function updateStats(){
+  let total = 0, done = 0;
+  for(const dateKey in calEvents){
+    for(const ev of calEvents[dateKey]){
+      total++;
+      if(ev.status === 'done') done++;
+    }
+  }
+  document.getElementById('stat-text').textContent = `${done} / ${total} виконано`;
+  document.getElementById('stat-pct').textContent = total ? Math.round(done/total*100)+'%' : '0%';
+  document.getElementById('progress-fill').style.width = (total ? done/total*100 : 0)+'%';
+}
+
+function showSlotError(slotEl){
+  let err = slotEl.querySelector('.slot-err');
+  if(!err){
+    err = document.createElement('div');
+    err.className = 'slot-err';
+    slotEl.appendChild(err);
+  }
+  err.textContent = 'помилка';
+  clearTimeout(err._t);
+  err._t = setTimeout(() => err.remove(), 3000);
+}
+
+async function setStatus(uid, start, newStatus, entry){
+  const { ev } = entry;
+  const prevStatus = ev.status;
+  ev.status = newStatus;
+  applySlotVisual(entry);
+  updateStats();
+  lastCalHash = JSON.stringify(calEvents);
+  try {
+    const r = await apiFetch('/status', { method:'POST', body: JSON.stringify({ uid, start, status: newStatus }) });
+    if(!r.ok) throw new Error('request failed');
+  } catch(e) {
+    ev.status = prevStatus;
+    applySlotVisual(entry);
+    updateStats();
+    lastCalHash = JSON.stringify(calEvents);
+    showSlotError(entry.slotEl);
+  }
 }
 
 function render(){
   const container = document.getElementById('days');
   container.innerHTML = '';
-  const { from, to } = loadRange();
+  for(const k in slotIndex) delete slotIndex[k];
   const today = new Date().toISOString().slice(0,10);
-  let total = 0, done = 0;
 
   const dates = Object.keys(calEvents).sort();
   for(const dateKey of dates){
@@ -198,24 +251,17 @@ function render(){
     dayDiv.appendChild(title);
 
     slots.forEach(ev => {
-      total++;
-      if(ev.status === 'done') done++;
       const slotEl = document.createElement('div');
-      slotEl.className = 'slot' + (ev.status==='done'?' done':'') + (ev.status==='skipped'?' skipped':'');
       const timeEl = document.createElement('div'); timeEl.className='time';
       timeEl.textContent = fmtTime(ev.start) + '–' + fmtTime(ev.end);
       const labelEl = document.createElement('div'); labelEl.className='label'; labelEl.textContent = ev.title;
       const btnRow = document.createElement('div'); btnRow.className='btn-row';
 
       const doneBtn = document.createElement('button');
-      doneBtn.className = 'ibtn' + (ev.status==='done' ? ' on done' : '');
       doneBtn.textContent = '✓';
-      doneBtn.onclick = () => setStatus(ev.uid, ev.start, ev.status==='done' ? 'pending' : 'done');
 
       const skipBtn = document.createElement('button');
-      skipBtn.className = 'ibtn' + (ev.status==='skipped' ? ' on skip' : '');
       skipBtn.textContent = '✕';
-      skipBtn.onclick = () => setStatus(ev.uid, ev.start, ev.status==='skipped' ? 'pending' : 'skipped');
 
       const pomoBtn = document.createElement('button');
       pomoBtn.className = 'ibtn';
@@ -225,13 +271,17 @@ function render(){
       btnRow.append(doneBtn, skipBtn, pomoBtn);
       slotEl.append(timeEl, labelEl, btnRow);
       dayDiv.appendChild(slotEl);
+
+      const entry = { ev, slotEl, doneBtn, skipBtn };
+      slotIndex[slotKey(ev.uid, ev.start)] = entry;
+      applySlotVisual(entry);
+      doneBtn.onclick = () => setStatus(ev.uid, ev.start, ev.status==='done' ? 'pending' : 'done', entry);
+      skipBtn.onclick = () => setStatus(ev.uid, ev.start, ev.status==='skipped' ? 'pending' : 'skipped', entry);
     });
     container.appendChild(dayDiv);
   }
 
-  document.getElementById('stat-text').textContent = `${done} / ${total} виконано`;
-  document.getElementById('stat-pct').textContent = total ? Math.round(done/total*100)+'%' : '0%';
-  document.getElementById('progress-fill').style.width = (total ? done/total*100 : 0)+'%';
+  updateStats();
 }
 
 async function loadCounter(){
