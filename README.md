@@ -118,8 +118,9 @@ legacy history). Dark theme, responsive down to mobile widths.
 
 ## Legacy data import
 
-`legacy-import.json` holds historical done/skipped records from a prior tracker (`state.json`
-export), imported into the `legacy_history` table on every boot (idempotent). `migrate-legacy-to-calendar.js`
+If migrating from a prior tracker, drop its exported history as `legacy-import.json` (gitignored —
+it's personal data, not part of this repo) in the shape `{ "<slotKey>": "done"|"skipped", ... }`.
+It's imported into the `legacy_history` table on every boot (idempotent). `migrate-legacy-to-calendar.js`
 is a one-off script that additionally tries to project each historical record back onto the
 matching real Calendar event (by date + closest start time), so old history shows up visually too
 — not every entry can be matched if the original event no longer exists or times drifted.
