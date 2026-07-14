@@ -14,5 +14,8 @@
     "express": "^5.2.1",
     "googleapis": "^173.0.0",
     "node-ical": "^0.26.1"
+  },
+  "devDependencies": {
+    "playwright": "^1.61.1"
   }
 }
