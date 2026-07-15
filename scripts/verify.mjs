@@ -50,6 +50,7 @@ const checks = {
 
   async ['add-task'](page) {
     await login(page);
+    await page.locator('.slot').first().waitFor({ state: 'visible', timeout: 10000 });
     const before = await page.locator('.slot').count();
     const title = `verify-task-${Date.now()}`;
     await page.fill('#task-title', title);
@@ -86,11 +87,14 @@ async function main() {
     const page = await browser.newPage();
     const result = await checks[name](page);
     console.log(result.pass ? 'PASS' : 'FAIL', '-', result.detail);
-    process.exit(result.pass ? 0 : 1);
+    process.exitCode = result.pass ? 0 : 1;
   } catch (err) {
     console.log('FAIL', '-', err.message);
-    process.exit(1);
+    process.exitCode = 1;
   } finally {
+    // process.exit() here would terminate before this await resolves, leaking
+    // the browser's child processes — fatal on a VPS with no swap. Setting
+    // exitCode and letting main() return lets Node exit only once close() is done.
     if (browser) await browser.close();
   }
 }

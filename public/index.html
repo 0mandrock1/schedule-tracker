@@ -19,6 +19,18 @@
 
   .toolbar{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center}
   .toolbar input[type=date]{background:var(--card);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:6px 8px;font-size:13px}
+
+  .task-form{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:10px}
+  .task-form input{background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:6px 8px;font-size:13px}
+  .task-form input[type=text]{flex:1;min-width:140px}
+  .task-form button{background:var(--accent);border:0;color:#04201c;border-radius:8px;padding:6px 14px;font-size:13px;cursor:pointer;font-weight:600}
+
+  .reschedule-panel{display:none;gap:6px;padding:8px 10px;background:var(--card);border:1px solid var(--border);border-top:0;border-radius:0 0 8px 8px;margin:-5px 0 5px;flex-wrap:wrap;align-items:center}
+  .reschedule-panel.open{display:flex}
+  .reschedule-panel input{background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 6px;font-size:12px}
+  .reschedule-panel button{border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer}
+  .reschedule-panel .save{background:var(--accent);border:0;color:#04201c;font-weight:600}
+  .reschedule-panel .cancel{background:transparent;border:1px solid var(--border);color:var(--muted)}
   .tabs{display:flex;gap:6px;margin-bottom:16px}
   .tab{background:var(--card);border:1px solid var(--border);color:var(--muted);border-radius:8px;padding:6px 14px;font-size:13px;cursor:pointer}
   .tab.active{color:var(--text);border-color:var(--accent)}
@@ -90,6 +102,13 @@
   <div class="progress-wrap">
     <div class="stats"><span id="stat-text">0 / 0 виконано</span><span id="stat-pct">0%</span></div>
     <div class="progress-bar"><div class="progress-fill" id="progress-fill" style="width:0%"></div></div>
+  </div>
+
+  <div class="task-form">
+    <input type="text" id="task-title" placeholder="Нова задача">
+    <input type="datetime-local" id="task-start">
+    <input type="datetime-local" id="task-end">
+    <button id="task-add-submit">Додати</button>
   </div>
 
   <div id="days"></div>
@@ -184,6 +203,98 @@ function saveRange(r){ localStorage.setItem(RANGE_KEY, JSON.stringify(r)); }
 function fmtDay(d){ return d.toLocaleDateString('uk-UA',{weekday:'short',day:'2-digit',month:'2-digit'}); }
 function fmtTime(iso){ return new Date(iso).toLocaleTimeString('uk-UA',{hour:'2-digit',minute:'2-digit',timeZone:'Europe/Kiev'}); }
 function slotKey(uid, start){ return uid + '|' + start; }
+
+// ---- Europe/Kiev <-> naive datetime-local conversion (server stores/reads everything in Kyiv wall-clock terms) ----
+const kyivDateFmt = new Intl.DateTimeFormat('en-CA', { timeZone:'Europe/Kiev', year:'numeric', month:'2-digit', day:'2-digit' });
+const kyivTimeFmt = new Intl.DateTimeFormat('en-GB', { timeZone:'Europe/Kiev', hour:'2-digit', minute:'2-digit', hour12:false });
+
+function isoToKyivLocal(iso){
+  const d = new Date(iso);
+  return `${kyivDateFmt.format(d)}T${kyivTimeFmt.format(d)}`;
+}
+function getTZOffsetMinutes(date, timeZone){
+  const dtf = new Intl.DateTimeFormat('en-US', { timeZone, hour12:false, year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit' });
+  const p = dtf.formatToParts(date).reduce((acc,x)=>{acc[x.type]=x.value;return acc;},{});
+  const asUTC = Date.UTC(p.year, p.month-1, p.day, p.hour==='24'?0:p.hour, p.minute, p.second);
+  return (asUTC - date.getTime())/60000;
+}
+function kyivLocalToISO(localValue){
+  const guessUtc = new Date(localValue + ':00Z');
+  const offsetMin = getTZOffsetMinutes(guessUtc, 'Europe/Kiev');
+  return new Date(guessUtc.getTime() - offsetMin*60000).toISOString();
+}
+
+// ---- optimistic local mutations for add/delete/reschedule — the public iCal feed Google exposes
+// lags real-time writes by more than our own icalCache TTL, so we don't wait on a refetch to reflect them ----
+function insertLocalEvent({ uid, start, end, title }){
+  const startD = new Date(start), endD = new Date(end);
+  const dateKey = kyivDateFmt.format(startD);
+  const [sh,sm] = kyivTimeFmt.format(startD).split(':').map(Number);
+  const [eh,em] = kyivTimeFmt.format(endD).split(':').map(Number);
+  const ev = { uid, start, end, startMin: sh*60+sm, endMin: eh*60+em, title, status:'pending', description:'' };
+  (calEvents[dateKey] = calEvents[dateKey] || []).push(ev);
+  lastCalHash = JSON.stringify(calEvents);
+  render();
+}
+function removeLocalEvent(uid, start){
+  for(const dateKey in calEvents){
+    const idx = calEvents[dateKey].findIndex(e=>e.uid===uid && e.start===start);
+    if(idx !== -1){
+      calEvents[dateKey].splice(idx,1);
+      if(!calEvents[dateKey].length) delete calEvents[dateKey];
+      break;
+    }
+  }
+  lastCalHash = JSON.stringify(calEvents);
+  render();
+}
+function updateLocalEventTime(uid, oldStart, newStartISO, newEndISO){
+  let found = null;
+  for(const dateKey in calEvents){
+    const idx = calEvents[dateKey].findIndex(e=>e.uid===uid && e.start===oldStart);
+    if(idx !== -1){ found = calEvents[dateKey].splice(idx,1)[0]; if(!calEvents[dateKey].length) delete calEvents[dateKey]; break; }
+  }
+  if(!found) return;
+  found.start = newStartISO; found.end = newEndISO;
+  const startD = new Date(newStartISO), endD = new Date(newEndISO);
+  const dateKey = kyivDateFmt.format(startD);
+  const [sh,sm] = kyivTimeFmt.format(startD).split(':').map(Number);
+  const [eh,em] = kyivTimeFmt.format(endD).split(':').map(Number);
+  found.startMin = sh*60+sm; found.endMin = eh*60+em;
+  (calEvents[dateKey] = calEvents[dateKey] || []).push(found);
+  lastCalHash = JSON.stringify(calEvents);
+  render();
+}
+
+async function deleteTaskUI(uid, start, title){
+  if(!confirm(`Видалити "${title}"?`)) return;
+  const r = await apiFetch(`/task/${encodeURIComponent(uid)}?start=${encodeURIComponent(start)}`, { method:'DELETE' });
+  if(!r.ok){ alert('Не вдалося видалити'); return; }
+  removeLocalEvent(uid, start);
+}
+
+async function saveReschedule(uid, oldStart, startLocal, endLocal){
+  const newStart = kyivLocalToISO(startLocal);
+  const newEnd = kyivLocalToISO(endLocal);
+  const r = await apiFetch(`/task/${encodeURIComponent(uid)}`, { method:'PATCH', body: JSON.stringify({ start: oldStart, newStart, newEnd }) });
+  if(!r.ok){ alert('Не вдалося перенести'); return; }
+  updateLocalEventTime(uid, oldStart, newStart, newEnd);
+}
+
+document.getElementById('task-add-submit').onclick = async () => {
+  const titleInput = document.getElementById('task-title');
+  const startInput = document.getElementById('task-start');
+  const endInput = document.getElementById('task-end');
+  const title = titleInput.value.trim();
+  if(!title || !startInput.value || !endInput.value) return;
+  const startISO = kyivLocalToISO(startInput.value);
+  const endISO = kyivLocalToISO(endInput.value);
+  const r = await apiFetch('/task', { method:'POST', body: JSON.stringify({ title, start: startISO, end: endISO }) });
+  if(!r.ok){ alert('Не вдалося додати задачу'); return; }
+  const { iCalUID } = await r.json();
+  insertLocalEvent({ uid: iCalUID, start: startISO, end: endISO, title });
+  titleInput.value = ''; startInput.value = ''; endInput.value = '';
+};
 
 async function loadCalendar(){
   const { from, to } = loadRange();
@@ -282,9 +393,33 @@ function render(){
       pomoBtn.textContent = '⏱';
       pomoBtn.onclick = () => startPomodoro(ev.uid);
 
-      btnRow.append(doneBtn, skipBtn, pomoBtn);
+      const rescheduleBtn = document.createElement('button');
+      rescheduleBtn.className = 'ibtn';
+      rescheduleBtn.textContent = '🕓';
+
+      const deleteBtn = document.createElement('button');
+      deleteBtn.className = 'ibtn';
+      deleteBtn.textContent = '🗑';
+
+      btnRow.append(doneBtn, skipBtn, pomoBtn, rescheduleBtn, deleteBtn);
       slotEl.append(timeEl, labelEl, btnRow);
       dayDiv.appendChild(slotEl);
+
+      const panel = document.createElement('div');
+      panel.className = 'reschedule-panel';
+      const startInput = document.createElement('input'); startInput.type = 'datetime-local';
+      startInput.value = isoToKyivLocal(ev.start);
+      const endInput = document.createElement('input'); endInput.type = 'datetime-local';
+      endInput.value = isoToKyivLocal(ev.end);
+      const saveBtn = document.createElement('button'); saveBtn.className = 'save'; saveBtn.textContent = 'Зберегти';
+      const cancelBtn = document.createElement('button'); cancelBtn.className = 'cancel'; cancelBtn.textContent = 'Скасувати';
+      panel.append(startInput, endInput, saveBtn, cancelBtn);
+      dayDiv.appendChild(panel);
+
+      rescheduleBtn.onclick = () => panel.classList.toggle('open');
+      cancelBtn.onclick = () => panel.classList.remove('open');
+      saveBtn.onclick = () => saveReschedule(ev.uid, ev.start, startInput.value, endInput.value);
+      deleteBtn.onclick = () => deleteTaskUI(ev.uid, ev.start, ev.title);
 
       const entry = { ev, slotEl, doneBtn, skipBtn };
       slotIndex[slotKey(ev.uid, ev.start)] = entry;

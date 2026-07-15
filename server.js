@@ -3,7 +3,7 @@ const fs = require('fs');
 const express = require('express');
 const path = require('path');
 const { db, importLegacy } = require('./db');
-const { calendarByDate, setEventStatus, setEventMarkers } = require('./calendar');
+const { calendarByDate, setEventStatus, setEventMarkers, createTask, deleteTask, rescheduleTask } = require('./calendar');
 const { exchangeCode } = require('./auth');
 const pomodoro = require('./pomodoro');
 
@@ -68,6 +68,40 @@ app.post('/schedule-tracker-api/markers', async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     res.status(502).json({ error: 'update failed', detail: err.message });
+  }
+});
+
+app.post('/schedule-tracker-api/task', async (req, res) => {
+  const { title, start, end } = req.body || {};
+  if (!title || !start || !end) return res.status(400).json({ error: 'title, start, end required' });
+  try {
+    const data = await createTask({ title, start, end });
+    res.json({ ok: true, id: data.id, iCalUID: data.iCalUID });
+  } catch (err) {
+    res.status(502).json({ error: 'create failed', detail: err.message });
+  }
+});
+
+app.delete('/schedule-tracker-api/task/:uid', async (req, res) => {
+  const { start } = req.query;
+  if (!start) return res.status(400).json({ error: 'start query param required to resolve the instance' });
+  try {
+    await deleteTask(req.params.uid, start);
+    db.prepare('DELETE FROM tasks WHERE eventId = ?').run(req.params.uid);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(502).json({ error: 'delete failed', detail: err.message });
+  }
+});
+
+app.patch('/schedule-tracker-api/task/:uid', async (req, res) => {
+  const { start, newStart, newEnd } = req.body || {};
+  if (!start || !newStart || !newEnd) return res.status(400).json({ error: 'start, newStart, newEnd required' });
+  try {
+    await rescheduleTask(req.params.uid, start, newStart, newEnd);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(502).json({ error: 'reschedule failed', detail: err.message });
   }
 });
 

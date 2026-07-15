@@ -184,4 +184,36 @@ async function setEventMarkers(uid, startISO, markers, calendarId = CALENDAR_ID)
   return data;
 }
 
-module.exports = { calendarByDate, getEventsInRange, setEventStatus, setEventMarkers, stripPrefix };
+async function createTask({ title, start, end }, calendarId = CALENDAR_ID) {
+  const cal = await getCalendarClient();
+  const { data } = await cal.events.insert({
+    calendarId,
+    requestBody: { summary: title, start: { dateTime: start }, end: { dateTime: end } }
+  });
+  icalCache = { data: null, ts: 0 };
+  return data;
+}
+
+async function deleteTask(uid, startISO, calendarId = CALENDAR_ID) {
+  const cal = await getCalendarClient();
+  const eventId = await resolveInstanceEventId(cal, calendarId, uid, startISO);
+  await cal.events.delete({ calendarId, eventId });
+  icalCache = { data: null, ts: 0 };
+}
+
+async function rescheduleTask(uid, startISO, newStart, newEnd, calendarId = CALENDAR_ID) {
+  const cal = await getCalendarClient();
+  const eventId = await resolveInstanceEventId(cal, calendarId, uid, startISO);
+  const { data } = await cal.events.patch({
+    calendarId,
+    eventId,
+    requestBody: { start: { dateTime: newStart }, end: { dateTime: newEnd } }
+  });
+  icalCache = { data: null, ts: 0 };
+  return data;
+}
+
+module.exports = {
+  calendarByDate, getEventsInRange, setEventStatus, setEventMarkers, stripPrefix,
+  createTask, deleteTask, rescheduleTask
+};
