@@ -1,9 +1,11 @@
+require('dotenv').config({ path: require('path').join(__dirname, '.env'), quiet: true });
 const fs = require('fs');
 const express = require('express');
 const path = require('path');
 const { db, importLegacy } = require('./db');
 const { calendarByDate, setEventStatus, setEventMarkers } = require('./calendar');
 const { exchangeCode } = require('./auth');
+const pomodoro = require('./pomodoro');
 
 const TOKEN_FILE = path.join(__dirname, 'config', 'token.json');
 
@@ -89,27 +91,68 @@ app.get('/schedule-tracker-api/legacy-history', (req, res) => {
   res.json(rows);
 });
 
-app.post('/schedule-tracker-api/pomodoro/start', (req, res) => {
-  const { uid } = req.body || {};
-  const info = db.prepare('INSERT INTO pomodoro_log (eventId, startedAt) VALUES (?, datetime(\'now\'))').run(uid || null);
-  res.json({ id: info.lastInsertRowid });
+app.get('/schedule-tracker-api/pomodoro/active', (req, res) => {
+  const st = pomodoro.checkAndAdvance(true);
+  res.json(pomodoro.stateToJson(st));
 });
 
-app.post('/schedule-tracker-api/pomodoro/:id/finish', (req, res) => {
+app.post('/schedule-tracker-api/pomodoro/start', (req, res) => {
+  const { uid } = req.body || {};
+  const st = pomodoro.startCycle(uid || null);
+  res.json(pomodoro.stateToJson(st));
+});
+
+app.post('/schedule-tracker-api/pomodoro/stop', (req, res) => {
   const { completed } = req.body || {};
-  const row = db.prepare('SELECT startedAt FROM pomodoro_log WHERE id = ?').get(req.params.id);
-  if (!row) return res.status(404).json({ error: 'not found' });
-  db.prepare(`
-    UPDATE pomodoro_log SET endedAt = datetime('now'), completed = ?,
-    durationSec = CAST((julianday(datetime('now')) - julianday(startedAt)) * 86400 AS INTEGER)
-    WHERE id = ?
-  `).run(completed ? 1 : 0, req.params.id);
+  pomodoro.stopCycle(!!completed);
   res.json({ ok: true });
+});
+
+app.post('/schedule-tracker-api/pomodoro/pause', (req, res) => {
+  const st = pomodoro.pauseCycle();
+  res.json(pomodoro.stateToJson(st));
+});
+
+app.post('/schedule-tracker-api/pomodoro/resume', (req, res) => {
+  const st = pomodoro.resumeCycle();
+  res.json(pomodoro.stateToJson(st));
+});
+
+app.post('/schedule-tracker-api/pomodoro/skip', (req, res) => {
+  const st = pomodoro.skipPhase();
+  res.json(pomodoro.stateToJson(st));
 });
 
 app.get('/schedule-tracker-api/pomodoro/log', (req, res) => {
   const rows = db.prepare('SELECT * FROM pomodoro_log ORDER BY startedAt DESC LIMIT 200').all();
   res.json(rows);
+});
+
+app.get('/schedule-tracker-api/pomodoro/focus-summary', (req, res) => {
+  const { from, to } = req.query;
+  const rows = db.prepare(`
+    SELECT eventId, SUM(durationSec) as totalSec, COUNT(*) as sessions
+    FROM pomodoro_log
+    WHERE phase = 'work' AND durationSec IS NOT NULL AND eventId IS NOT NULL
+      AND (? IS NULL OR startedAt >= ?) AND (? IS NULL OR startedAt <= ?)
+    GROUP BY eventId
+    ORDER BY totalSec DESC
+  `).all(from || null, from || null, to || null, to || null);
+  res.json(rows);
+});
+
+app.get('/schedule-tracker-api/push/vapid-public-key', (req, res) => {
+  res.json({ key: process.env.VAPID_PUBLIC_KEY || null });
+});
+
+app.post('/schedule-tracker-api/push/subscribe', (req, res) => {
+  const { subscription } = req.body || {};
+  if (!subscription || !subscription.endpoint) return res.status(400).json({ error: 'subscription required' });
+  db.prepare(`
+    INSERT INTO push_subscriptions (endpoint, subscription) VALUES (?, ?)
+    ON CONFLICT(endpoint) DO UPDATE SET subscription = excluded.subscription
+  `).run(subscription.endpoint, JSON.stringify(subscription));
+  res.json({ ok: true });
 });
 
 app.get('/oauth/callback', async (req, res) => {
@@ -133,6 +176,10 @@ app.listen(PORT, '127.0.0.1', () => {
   const legacyCount = importLegacy(path.join(__dirname, 'legacy-import.json'));
   console.log(`schedule-tracker listening on ${PORT}, imported ${legacyCount} legacy entries`);
 });
+
+// Advances pomodoro phases (and fires push notifications) even when nobody is
+// polling /pomodoro/active — otherwise "start on phone, walk away" never notifies.
+setInterval(() => pomodoro.checkAndAdvance(true), 5000);
 
 // Keeps the event loop alive under process supervisors (systemd) that were
 // observed letting the loop drain immediately after listen() despite the

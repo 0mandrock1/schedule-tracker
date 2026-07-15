@@ -33,7 +33,31 @@ CREATE TABLE IF NOT EXISTS legacy_history (
   date TEXT NOT NULL,
   status TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS pomodoro_state (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  phase TEXT NOT NULL,
+  cycleCount INTEGER NOT NULL,
+  phaseDurationSec INTEGER NOT NULL,
+  startedAt TEXT NOT NULL,
+  eventId TEXT,
+  paused INTEGER NOT NULL DEFAULT 0,
+  pausedRemainingSec INTEGER,
+  logId INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  endpoint TEXT UNIQUE NOT NULL,
+  subscription TEXT NOT NULL,
+  createdAt TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `);
+
+// pomodoro_log predates the phase/cycleCount columns — add them if missing (idempotent across restarts).
+const pomodoroLogCols = db.prepare("PRAGMA table_info(pomodoro_log)").all().map(c => c.name);
+if (!pomodoroLogCols.includes('phase')) db.exec("ALTER TABLE pomodoro_log ADD COLUMN phase TEXT");
+if (!pomodoroLogCols.includes('cycleCount')) db.exec("ALTER TABLE pomodoro_log ADD COLUMN cycleCount INTEGER");
 
 function importLegacy(legacyPath) {
   const raw = JSON.parse(fs.readFileSync(legacyPath, 'utf8'));

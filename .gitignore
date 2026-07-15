@@ -3,3 +3,4 @@ config/
 *.db
 *.db-*
 legacy-import.json
+.env

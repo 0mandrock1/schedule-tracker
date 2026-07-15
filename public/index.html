@@ -48,7 +48,10 @@
   #counter table{width:100%;border-collapse:collapse;font-size:13px}
   #counter td,#counter th{padding:6px 4px;border-bottom:1px solid var(--border);text-align:left}
 
-  #pomo{position:fixed;bottom:14px;right:14px;left:14px;max-width:400px;margin-inline:auto;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px 16px;display:flex;align-items:center;gap:12px;font-size:14px}
+  #pomo{position:fixed;bottom:14px;right:14px;left:14px;max-width:460px;margin-inline:auto;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px 16px;display:flex;align-items:center;gap:10px;font-size:14px;flex-wrap:wrap}
+  #pomo .pomo-info{flex:1;min-width:80px}
+  #pomo .pomo-phase{font-size:12px;color:var(--accent);font-weight:600}
+  #pomo .pomo-task{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:140px}
   #pomo .time-display{font-variant-numeric:tabular-nums;font-size:20px;min-width:64px}
   #pomo button{background:var(--accent);border:0;color:#04201c;border-radius:8px;padding:8px 14px;font-size:13px;cursor:pointer;font-weight:600}
   #pomo button.secondary{background:transparent;border:1px solid var(--border);color:var(--muted)}
@@ -100,12 +103,23 @@
       <h3 style="margin-top:0">Legacy історія (до 2026-07-13)</h3>
       <table id="legacy-table"><thead><tr><th>Статус</th><th>К-сть</th></tr></thead><tbody></tbody></table>
     </div>
+    <div class="progress-wrap">
+      <h3 style="margin-top:0">Фокус-час по задачах (pomodoro)</h3>
+      <table id="focus-table"><thead><tr><th>Задача</th><th>Хв</th><th>Сесій</th></tr></thead><tbody></tbody></table>
+    </div>
   </div>
 </div>
 
 <div id="pomo" style="display:none">
+  <div class="pomo-info">
+    <div class="pomo-phase" id="pomo-phase"></div>
+    <div class="pomo-task" id="pomo-task"></div>
+  </div>
   <div class="time-display" id="pomo-time">25:00</div>
   <button id="pomo-start">Старт</button>
+  <button class="secondary" id="pomo-pause" style="display:none">Пауза</button>
+  <button class="secondary" id="pomo-resume" style="display:none">Продовжити</button>
+  <button class="secondary" id="pomo-skip" style="display:none">⏭</button>
   <button class="secondary" id="pomo-stop" style="display:none">Стоп</button>
 </div>
 
@@ -284,6 +298,16 @@ function render(){
   updateStats();
 }
 
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+function findEventByUid(uid){
+  for(const dateKey in calEvents){
+    const ev = calEvents[dateKey].find(e=>e.uid===uid);
+    if(ev) return ev;
+  }
+  return null;
+}
+
 async function loadCounter(){
   const { from, to } = loadRange();
   const r = await apiFetch(`/counter?from=${from}&to=${to}`);
@@ -292,6 +316,15 @@ async function loadCounter(){
   liveBody.innerHTML = data.live.map(row => `<tr><td>${row.status}</td><td>${row.n}</td></tr>`).join('') || '<tr><td colspan=2>—</td></tr>';
   const legacyBody = document.querySelector('#legacy-table tbody');
   legacyBody.innerHTML = data.legacy.map(row => `<tr><td>${row.status}</td><td>${row.n}</td></tr>`).join('') || '<tr><td colspan=2>—</td></tr>';
+
+  const fr = await apiFetch(`/pomodoro/focus-summary?from=${from}&to=${to}`);
+  const focusRows = await fr.json();
+  const focusBody = document.querySelector('#focus-table tbody');
+  focusBody.innerHTML = focusRows.map(row => {
+    const ev = findEventByUid(row.eventId);
+    const title = escapeHtml(ev ? ev.title : row.eventId);
+    return `<tr><td>${title}</td><td>${Math.round(row.totalSec/60)}</td><td>${row.sessions}</td></tr>`;
+  }).join('') || '<tr><td colspan=3>—</td></tr>';
 }
 
 document.querySelectorAll('.tab').forEach(tab => {
@@ -310,46 +343,134 @@ document.getElementById('from-date').onchange = e => { const r=loadRange(); r.fr
 document.getElementById('to-date').onchange = e => { const r=loadRange(); r.to=e.target.value; saveRange(r); loadCalendar(); };
 
 // ---- pomodoro ----
-let pomoState = { running:false, remaining:1500, timerId:null, currentPomoId:null };
+let pomoActive = { active:false };
+let phaseEndsAt = null; // wall-clock ms epoch — avoids drift vs a locally-decremented counter
+let pomoTickId = null;
+const PUSH_ASKED_KEY = 'st_push_asked';
+
 function updatePomoDisplay(){
-  const m = Math.floor(pomoState.remaining/60).toString().padStart(2,'0');
-  const s = (pomoState.remaining%60).toString().padStart(2,'0');
+  const startBtn = document.getElementById('pomo-start');
+  const pauseBtn = document.getElementById('pomo-pause');
+  const resumeBtn = document.getElementById('pomo-resume');
+  const skipBtn = document.getElementById('pomo-skip');
+  const stopBtn = document.getElementById('pomo-stop');
+  const phaseEl = document.getElementById('pomo-phase');
+  const taskEl = document.getElementById('pomo-task');
+
+  if(!pomoActive || !pomoActive.active){
+    document.getElementById('pomo-time').textContent = '25:00';
+    phaseEl.textContent = '';
+    taskEl.textContent = '';
+    startBtn.style.display = '';
+    pauseBtn.style.display = 'none';
+    resumeBtn.style.display = 'none';
+    skipBtn.style.display = 'none';
+    stopBtn.style.display = 'none';
+    return;
+  }
+
+  const remaining = pomoActive.paused
+    ? pomoActive.remainingSec
+    : Math.max(0, Math.round((phaseEndsAt - Date.now())/1000));
+  const m = Math.floor(remaining/60).toString().padStart(2,'0');
+  const s = (remaining%60).toString().padStart(2,'0');
   document.getElementById('pomo-time').textContent = `${m}:${s}`;
+  phaseEl.textContent = pomoActive.phaseLabel + (pomoActive.phase==='work' ? ` (${pomoActive.cycleCount}/4)` : '');
+  const taskEv = pomoActive.eventId ? findEventByUid(pomoActive.eventId) : null;
+  taskEl.textContent = taskEv ? taskEv.title : (pomoActive.eventId ? '' : 'Загальний фокус');
+
+  startBtn.style.display = 'none';
+  pauseBtn.style.display = pomoActive.paused ? 'none' : '';
+  resumeBtn.style.display = pomoActive.paused ? '' : 'none';
+  skipBtn.style.display = '';
+  stopBtn.style.display = '';
 }
-async function startPomodoro(uid){
-  if(pomoState.running) return;
-  const r = await apiFetch('/pomodoro/start', { method:'POST', body: JSON.stringify({ uid: uid||null }) });
-  const { id } = await r.json();
-  pomoState.currentPomoId = id;
-  pomoState.running = true;
-  pomoState.remaining = 1500;
-  document.getElementById('pomo-start').style.display = 'none';
-  document.getElementById('pomo-stop').style.display = '';
-  pomoState.timerId = setInterval(() => {
-    pomoState.remaining--;
+
+function scheduleTick(){
+  clearInterval(pomoTickId);
+  pomoTickId = setInterval(() => {
     updatePomoDisplay();
-    if(pomoState.remaining <= 0) finishPomodoro(true);
+    if(pomoActive.active && !pomoActive.paused && Date.now() >= phaseEndsAt){
+      refreshPomoState(); // server already advanced phase + sent push; pull the new state
+    }
   }, 1000);
 }
-async function finishPomodoro(completed){
-  clearInterval(pomoState.timerId);
-  if(pomoState.currentPomoId){
-    await apiFetch(`/pomodoro/${pomoState.currentPomoId}/finish`, { method:'POST', body: JSON.stringify({ completed }) });
-  }
-  pomoState = { running:false, remaining:1500, timerId:null, currentPomoId:null };
-  updatePomoDisplay();
-  document.getElementById('pomo-start').style.display = '';
-  document.getElementById('pomo-stop').style.display = 'none';
-}
-document.getElementById('pomo-start').onclick = () => startPomodoro(null);
-document.getElementById('pomo-stop').onclick = () => finishPomodoro(false);
 
-function init(){
+async function refreshPomoState(){
+  const r = await apiFetch('/pomodoro/active');
+  pomoActive = await r.json();
+  if(pomoActive.active && !pomoActive.paused) phaseEndsAt = Date.now() + pomoActive.remainingSec*1000;
+  updatePomoDisplay();
+}
+
+function urlBase64ToUint8Array(base64String){
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g,'+').replace(/_/g,'/');
+  const raw = atob(base64);
+  return Uint8Array.from([...raw].map(c=>c.charCodeAt(0)));
+}
+
+async function maybeRequestPushPermission(){
+  if(sessionStorage.getItem(PUSH_ASKED_KEY)) return;
+  sessionStorage.setItem(PUSH_ASKED_KEY, '1');
+  if(!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+  try{
+    const perm = await Notification.requestPermission();
+    if(perm !== 'granted') return;
+    const reg = await navigator.serviceWorker.register('sw.js');
+    const r = await apiFetch('/push/vapid-public-key');
+    const { key } = await r.json();
+    if(!key) return;
+    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(key) });
+    await apiFetch('/push/subscribe', { method:'POST', body: JSON.stringify({ subscription: sub.toJSON() }) });
+  }catch(e){ /* denied or unsupported — pomodoro still works locally without push */ }
+}
+
+async function startPomodoro(uid){
+  if(pomoActive.active) return;
+  maybeRequestPushPermission();
+  const r = await apiFetch('/pomodoro/start', { method:'POST', body: JSON.stringify({ uid: uid||null }) });
+  pomoActive = await r.json();
+  if(pomoActive.active) phaseEndsAt = Date.now() + pomoActive.remainingSec*1000;
+  updatePomoDisplay();
+  scheduleTick();
+}
+async function stopPomodoro(){
+  await apiFetch('/pomodoro/stop', { method:'POST', body: JSON.stringify({ completed:false }) });
+  pomoActive = { active:false };
+  updatePomoDisplay();
+}
+async function pausePomodoro(){
+  const r = await apiFetch('/pomodoro/pause', { method:'POST' });
+  pomoActive = await r.json();
+  updatePomoDisplay();
+}
+async function resumePomodoro(){
+  const r = await apiFetch('/pomodoro/resume', { method:'POST' });
+  pomoActive = await r.json();
+  if(pomoActive.active) phaseEndsAt = Date.now() + pomoActive.remainingSec*1000;
+  updatePomoDisplay();
+}
+async function skipPomodoro(){
+  const r = await apiFetch('/pomodoro/skip', { method:'POST' });
+  pomoActive = await r.json();
+  if(pomoActive.active) phaseEndsAt = Date.now() + pomoActive.remainingSec*1000;
+  updatePomoDisplay();
+}
+
+document.getElementById('pomo-start').onclick = () => startPomodoro(null);
+document.getElementById('pomo-stop').onclick = () => stopPomodoro();
+document.getElementById('pomo-pause').onclick = () => pausePomodoro();
+document.getElementById('pomo-resume').onclick = () => resumePomodoro();
+document.getElementById('pomo-skip').onclick = () => skipPomodoro();
+
+async function init(){
   const { from, to } = loadRange();
   document.getElementById('from-date').value = from;
   document.getElementById('to-date').value = to;
-  updatePomoDisplay();
-  loadCalendar();
+  await loadCalendar();
+  await refreshPomoState(); // restores an in-progress cycle across page reloads / service restarts
+  scheduleTick();
   setInterval(loadCalendar, 30000);
 }
 </script>
