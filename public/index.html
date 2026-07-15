@@ -104,6 +104,7 @@
   <div class="tabs">
     <div class="tab active" data-tab="days">Дні</div>
     <div class="tab" data-tab="counter">Лічильник</div>
+    <div class="tab" data-tab="about">Про</div>
   </div>
 
   <div class="progress-wrap">
@@ -132,6 +133,46 @@
     <div class="progress-wrap">
       <h3 style="margin-top:0">Фокус-час по задачах (pomodoro)</h3>
       <table id="focus-table"><thead><tr><th>Задача</th><th>Хв</th><th>Сесій</th></tr></thead><tbody></tbody></table>
+    </div>
+  </div>
+
+  <div id="about" style="display:none">
+    <div class="progress-wrap">
+      <h3 style="margin-top:0">Що це</h3>
+      <p style="font-size:13px;line-height:1.6">
+        Трекер задач, де <b>джерело правди — твій Google Calendar</b>, а не окрема база даних.
+        Кожна подія календаря — це задача. Немає окремого "стану" в застосунку: клік ✓ чи ✕
+        одразу міняє тайтл події (додає префікс <code>✅ </code>/<code>❌ </code>) і її колір
+        прямо в Google Calendar. Відкрий той самий календар в іншому клієнті — побачиш той самий
+        статус.
+      </p>
+    </div>
+    <div class="progress-wrap">
+      <h3 style="margin-top:0">Як працює статус</h3>
+      <p style="font-size:13px;line-height:1.6">
+        ✓ позначає задачу виконаною, ✕ — пропущеною, повторний клік повертає її в очікування.
+        Зміна застосовується миттєво в інтерфейсі (не чекає відповіді сервера) і синхронізується
+        з календарем у фоні. 🏷 додає довільні теги (не змінює статус) — зручно для позначок
+        типу "терміново" чи "чекає".
+      </p>
+    </div>
+    <div class="progress-wrap">
+      <h3 style="margin-top:0">Як працює pomodoro</h3>
+      <p style="font-size:13px;line-height:1.6">
+        Стандартний цикл: 25 хв роботи → 5 хв перерви, повторюється тричі, потім довга
+        15-хвилинна перерва — і цикл починається знову. Таймер прив'язується до конкретної
+        задачі кнопкою ⏱ (для аналітики фокус-часу в "Лічильник") або можна почати без
+        прив'язки. Стан циклу зберігається на сервері, тож перезавантаження сторінки чи
+        рестарт сервісу не скидають таймер. За бажанням дозволь push-нотифікації при першому
+        старті — прийде сповіщення про зміну фази, навіть якщо вкладку закрито.
+      </p>
+    </div>
+    <div class="progress-wrap">
+      <h3 style="margin-top:0">Пароль</h3>
+      <p style="font-size:13px;line-height:1.6">
+        Доступ до трекера захищено спільним паролем (не Google-акаунтом). Якщо загубив —
+        запитай у власника сервера.
+      </p>
     </div>
   </div>
 </div>
@@ -516,11 +557,13 @@ document.querySelectorAll('.tab').forEach(tab => {
   tab.onclick = () => {
     document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
     tab.classList.add('active');
-    const isCounter = tab.dataset.tab === 'counter';
-    document.getElementById('days').style.display = isCounter ? 'none' : '';
-    document.querySelector('.progress-wrap').style.display = isCounter ? 'none' : '';
-    document.getElementById('counter').style.display = isCounter ? '' : 'none';
-    if(isCounter) loadCounter();
+    const target = tab.dataset.tab; // 'days' | 'counter' | 'about'
+    document.getElementById('days').style.display = target === 'days' ? '' : 'none';
+    document.querySelector('.progress-wrap').style.display = target === 'days' ? '' : 'none';
+    document.querySelector('.task-form').style.display = target === 'days' ? '' : 'none';
+    document.getElementById('counter').style.display = target === 'counter' ? '' : 'none';
+    document.getElementById('about').style.display = target === 'about' ? '' : 'none';
+    if(target === 'counter') loadCounter();
   };
 });
 

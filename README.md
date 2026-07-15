@@ -98,14 +98,22 @@ All `/schedule-tracker-api/*` routes require an `x-passcode` header (or `?passco
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/schedule-tracker-api/calendar?from=YYYY-MM-DD&to=YYYY-MM-DD` | Day-grouped events with parsed status/title |
+| GET | `/schedule-tracker-api/calendar?from=YYYY-MM-DD&to=YYYY-MM-DD` | Day-grouped events with parsed status/title/markers |
 | POST | `/schedule-tracker-api/status` | `{ uid, start, status }` — status ∈ `pending, done, skipped` |
-| POST | `/schedule-tracker-api/markers` | `{ uid, start, markers: string[] }` |
+| POST | `/schedule-tracker-api/markers` | `{ uid, start, markers: string[] }` — free-form tags, not a status |
+| POST | `/schedule-tracker-api/task` | `{ title, start, end }` → creates a Calendar event, returns `{ id, iCalUID }` |
+| DELETE | `/schedule-tracker-api/task/:uid?start=` | Deletes one occurrence (recurring-safe — resolves the instance, not the master event) |
+| PATCH | `/schedule-tracker-api/task/:uid` | `{ start, newStart, newEnd }` — reschedules one occurrence |
 | GET | `/schedule-tracker-api/counter?from=&to=` | Aggregate done/skipped counts (live + legacy) |
 | GET | `/schedule-tracker-api/legacy-history` | Imported historical records |
-| POST | `/schedule-tracker-api/pomodoro/start` | `{ uid? }` → `{ id }` |
-| POST | `/schedule-tracker-api/pomodoro/:id/finish` | `{ completed: boolean }` |
-| GET | `/schedule-tracker-api/pomodoro/log` | Last 200 Pomodoro sessions |
+| GET | `/schedule-tracker-api/pomodoro/active` | Current pomodoro state (phase, cycleCount, remainingSec) or `{ active: false }` |
+| POST | `/schedule-tracker-api/pomodoro/start` | `{ uid? }` — starts a real work/short_break/long_break cycle, persisted server-side |
+| POST | `/schedule-tracker-api/pomodoro/stop` | `{ completed: boolean }` |
+| POST | `/schedule-tracker-api/pomodoro/pause` / `/resume` / `/skip` | Pause, resume, or manually advance the active cycle |
+| GET | `/schedule-tracker-api/pomodoro/log` | Last 200 Pomodoro phase sessions |
+| GET | `/schedule-tracker-api/pomodoro/focus-summary?from=&to=` | Per-task focus time, `GROUP BY eventId` on completed work phases |
+| GET | `/schedule-tracker-api/push/vapid-public-key` | Public VAPID key for `pushManager.subscribe` |
+| POST | `/schedule-tracker-api/push/subscribe` | `{ subscription }` — registers a Web Push endpoint for phase-change notifications |
 
 `GET /oauth/callback` is unauthenticated (needed for the Google redirect) and refuses to run once
 `config/token.json` already exists.
@@ -113,8 +121,22 @@ All `/schedule-tracker-api/*` routes require an `x-passcode` header (or `?passco
 ## Frontend
 
 Single-page app at `public/index.html`, served under `/schedule-tracker/`: passcode gate, day list
-view with a date-range picker, done/skip/Pomodoro buttons per event, and a counter tab (live +
-legacy history). Dark theme, responsive down to mobile widths.
+view with a date-range picker, done/skip/Pomodoro/reschedule/delete/tag buttons per event, an
+add-task form, a counter tab (live + legacy history + per-task focus time), and an "Про" (about)
+tab explaining the app to a new user. Dark theme, responsive down to mobile widths.
+
+Status toggles apply optimistically (flip the UI before the POST resolves, revert + show an inline
+error on failure) instead of waiting on a full recalendar fetch + re-render. Add/delete/reschedule
+do the same — Google's public iCal feed (what `GET /calendar` reads from) lags real-time Calendar
+API writes by more than this app's own 60s cache TTL, so waiting on a refetch to reflect a write
+would show stale data for a while.
+
+### Web Push (Pomodoro phase-change notifications)
+
+Requires VAPID keys (`npx web-push generate-vapid-keys`) in a gitignored `.env` — see
+`.env.example`. Without them, `push/vapid-public-key` returns `null` and the frontend silently
+skips the push-permission prompt; Pomodoro still works fully without it. `public/sw.js` is the
+service worker; permission is requested on first Pomodoro start, not on page load.
 
 ## Legacy data import
 
