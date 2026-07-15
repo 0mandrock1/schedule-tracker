@@ -54,8 +54,15 @@
   .ibtn{width:24px;height:24px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center}
   .ibtn.on.done{background:var(--done);border-color:var(--done);color:#04201c}
   .ibtn.on.skip{background:var(--red);border-color:var(--red);color:#fff}
-  .markers{font-size:11px;color:var(--accent)}
+  .markers{font-size:11px;color:var(--accent);margin-top:2px}
   .slot-err{font-size:11px;color:var(--red);white-space:nowrap}
+
+  .markers-panel{display:none;gap:6px;padding:8px 10px;background:var(--card);border:1px solid var(--border);border-top:0;border-radius:0 0 8px 8px;margin:-5px 0 5px;flex-wrap:wrap;align-items:center}
+  .markers-panel.open{display:flex}
+  .markers-panel input{background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 6px;font-size:12px;flex:1;min-width:80px}
+  .markers-panel button{background:var(--accent);border:0;color:#04201c;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;font-weight:600}
+  .chip{background:var(--bg);border:1px solid var(--accent);color:var(--accent);border-radius:12px;padding:2px 6px 2px 8px;font-size:11px;display:inline-flex;align-items:center;gap:4px}
+  .chip .x{cursor:pointer;color:var(--muted);font-weight:700}
 
   #counter table{width:100%;border-collapse:collapse;font-size:13px}
   #counter td,#counter th{padding:6px 4px;border-bottom:1px solid var(--border);text-align:left}
@@ -379,7 +386,11 @@ function render(){
       const slotEl = document.createElement('div');
       const timeEl = document.createElement('div'); timeEl.className='time';
       timeEl.textContent = fmtTime(ev.start) + '–' + fmtTime(ev.end);
-      const labelEl = document.createElement('div'); labelEl.className='label'; labelEl.textContent = ev.title;
+      const labelEl = document.createElement('div'); labelEl.className='label';
+      const titleSpan = document.createElement('div'); titleSpan.textContent = ev.title;
+      const markersSpan = document.createElement('div'); markersSpan.className = 'markers';
+      markersSpan.textContent = (ev.markers && ev.markers.length) ? ev.markers.join(' · ') : '';
+      labelEl.append(titleSpan, markersSpan);
       const btnRow = document.createElement('div'); btnRow.className='btn-row';
 
       const doneBtn = document.createElement('button');
@@ -401,7 +412,11 @@ function render(){
       deleteBtn.className = 'ibtn';
       deleteBtn.textContent = '🗑';
 
-      btnRow.append(doneBtn, skipBtn, pomoBtn, rescheduleBtn, deleteBtn);
+      const markerBtn = document.createElement('button');
+      markerBtn.className = 'ibtn';
+      markerBtn.textContent = '🏷';
+
+      btnRow.append(doneBtn, skipBtn, pomoBtn, rescheduleBtn, markerBtn, deleteBtn);
       slotEl.append(timeEl, labelEl, btnRow);
       dayDiv.appendChild(slotEl);
 
@@ -420,6 +435,41 @@ function render(){
       cancelBtn.onclick = () => panel.classList.remove('open');
       saveBtn.onclick = () => saveReschedule(ev.uid, ev.start, startInput.value, endInput.value);
       deleteBtn.onclick = () => deleteTaskUI(ev.uid, ev.start, ev.title);
+
+      const markersPanel = document.createElement('div');
+      markersPanel.className = 'markers-panel';
+      const tagInput = document.createElement('input'); tagInput.type = 'text'; tagInput.placeholder = 'новий тег';
+      const addTagBtn = document.createElement('button'); addTagBtn.textContent = '+';
+      function renderChips(){
+        markersPanel.querySelectorAll('.chip').forEach(c => c.remove());
+        (ev.markers || []).forEach(tag => {
+          const chip = document.createElement('span'); chip.className = 'chip';
+          const txt = document.createElement('span'); txt.textContent = tag;
+          const x = document.createElement('span'); x.className = 'x'; x.textContent = '×';
+          x.onclick = () => saveMarkers((ev.markers || []).filter(t => t !== tag));
+          chip.append(txt, x);
+          markersPanel.insertBefore(chip, tagInput);
+        });
+      }
+      async function saveMarkers(newMarkers){
+        const r = await apiFetch('/markers', { method:'POST', body: JSON.stringify({ uid: ev.uid, start: ev.start, markers: newMarkers }) });
+        if(!r.ok){ alert('Не вдалося зберегти теги'); return; }
+        ev.markers = newMarkers;
+        markersSpan.textContent = newMarkers.length ? newMarkers.join(' · ') : '';
+        lastCalHash = JSON.stringify(calEvents);
+        renderChips();
+      }
+      addTagBtn.onclick = () => {
+        const v = tagInput.value.trim();
+        if(!v) return;
+        saveMarkers([...(ev.markers || []), v]);
+        tagInput.value = '';
+      };
+      tagInput.addEventListener('keydown', e => { if(e.key === 'Enter') addTagBtn.click(); });
+      markersPanel.append(tagInput, addTagBtn);
+      renderChips();
+      markerBtn.onclick = () => markersPanel.classList.toggle('open');
+      dayDiv.appendChild(markersPanel);
 
       const entry = { ev, slotEl, doneBtn, skipBtn };
       slotIndex[slotKey(ev.uid, ev.start)] = entry;

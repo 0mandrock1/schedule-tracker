@@ -12,6 +12,11 @@ const SKIPPED_PREFIX = '❌ ';
 const COLOR_DONE = '10';
 const COLOR_SKIPPED = '11';
 
+// TODO if a real 5th+ status is ever wanted (not a marker/tag): this title-prefix + colorId
+// scheme is deliberately not extended for phase 4's markers feature, because Calendar
+// colorId only has ~11 values and prefix-matching gets fragile past two states. A real
+// new status needs its own design pass here (prefix table, color mapping, stripPrefix/
+// applyPrefix rewrite) — don't bolt it onto markers silently.
 function stripPrefix(title) {
   if (title.startsWith(DONE_PREFIX)) return { status: 'done', title: title.slice(DONE_PREFIX.length) };
   if (title.startsWith(SKIPPED_PREFIX)) return { status: 'skipped', title: title.slice(SKIPPED_PREFIX.length) };

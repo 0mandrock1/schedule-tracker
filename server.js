@@ -29,6 +29,16 @@ app.get('/schedule-tracker-api/calendar', async (req, res) => {
   if (!from || !to) return res.status(400).json({ error: 'from/to required (YYYY-MM-DD)' });
   try {
     const byDate = await calendarByDate(from, to);
+    // Markers live in extendedProperties on the Calendar event, but the public iCal feed
+    // we read from doesn't expose those — the tasks table mirror is the only place we can
+    // read them back from without burning Calendar API quota on every list request.
+    const markersByEventId = {};
+    for (const row of db.prepare('SELECT eventId, markers FROM tasks').all()) {
+      try { markersByEventId[row.eventId] = JSON.parse(row.markers || '[]'); } catch (e) { markersByEventId[row.eventId] = []; }
+    }
+    for (const dateKey in byDate) {
+      for (const ev of byDate[dateKey]) ev.markers = markersByEventId[ev.uid] || [];
+    }
     res.json(byDate);
   } catch (err) {
     res.status(502).json({ error: 'calendar fetch failed', detail: err.message });
