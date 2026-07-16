@@ -79,6 +79,7 @@ async function getEventsInRange(fromStr, toStr) {
     const ev = data[k];
     if (!ev || ev.type !== 'VEVENT' || !ev.start || !ev.end) continue;
     const duration = ev.end.getTime() - ev.start.getTime();
+    const allDay = ev.datetype === 'date' || Boolean(ev.start?.dateOnly);
 
     if (ev.rrule) {
       const correction = getRRuleCorrection(ev);
@@ -99,11 +100,11 @@ async function getEventsInRange(fromStr, toStr) {
           }
         }
         const realStart = new Date(o.getTime() + correction);
-        results.push({ uid: ev.uid, start: realStart, end: new Date(realStart.getTime() + duration), summary, description, colorId: ev.color || null });
+        results.push({ uid: ev.uid, start: realStart, end: new Date(realStart.getTime() + duration), summary, description, colorId: ev.color || null, allDay });
       }
     } else {
       if (ev.start < rangeEnd && ev.end > rangeStart) {
-        results.push({ uid: ev.uid, start: ev.start, end: ev.end, summary: ev.summary, description: descOf(ev.description), colorId: ev.color || null });
+        results.push({ uid: ev.uid, start: ev.start, end: ev.end, summary: ev.summary, description: descOf(ev.description), colorId: ev.color || null, allDay });
       }
     }
   }
@@ -129,7 +130,8 @@ async function calendarByDate(fromStr, toStr) {
       endMin: eh * 60 + em,
       title,
       status,
-      description: e.description || ''
+      description: e.description || '',
+      allDay: e.allDay
     });
   }
   return byDate;

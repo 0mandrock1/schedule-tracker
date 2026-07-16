@@ -41,20 +41,30 @@
   .progress-fill{height:100%;background:var(--accent);transition:width .3s}
 
   .day{margin-bottom:18px}
-  .day-title{font-size:14px;font-weight:500;margin-bottom:6px;color:var(--muted)}
+  .day-title{font-size:14px;font-weight:500;margin-bottom:6px;color:var(--muted);cursor:pointer;display:flex;align-items:center;gap:6px;user-select:none}
   .day-title.today{color:var(--accent)}
+  .day-title .chevron{display:inline-block;transition:transform .15s;font-size:11px}
+  .day.collapsed .day-title .chevron{transform:rotate(-90deg)}
+  .day-body{display:flex;flex-direction:column}
+  .day.collapsed .day-body{display:none}
+  .allday-summary{font-size:13px;color:var(--muted);cursor:pointer;display:flex;align-items:center;gap:6px;user-select:none;margin-bottom:4px}
+  .allday-summary .chevron{display:inline-block;transition:transform .15s;font-size:11px}
+  .allday-summary.expanded .chevron{transform:rotate(90deg)}
+  .allday-list{display:none;flex-direction:column;gap:2px;margin:2px 0 8px 18px;font-size:13px;color:var(--muted)}
+  .allday-summary.expanded + .allday-list{display:flex}
   .slot{display:flex;align-items:center;gap:10px;padding:9px 10px;background:var(--card);border:1px solid var(--border);border-radius:8px;margin-bottom:5px}
   .slot.done{opacity:.5}
   .slot.done .label{text-decoration:line-through}
   .slot.skipped{opacity:.5}
   .slot.skipped .label{text-decoration:line-through;color:var(--red)}
-  .time{font-size:11px;color:var(--muted);min-width:80px}
-  .label{font-size:13px;flex:1}
+  .time{font-size:11px;color:var(--muted);min-width:80px;cursor:pointer}
+  .label{font-size:13px;flex:1;cursor:pointer}
   .btn-row{display:flex;gap:4px;flex-shrink:0}
   .ibtn{width:24px;height:24px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center}
   .ibtn.on.done{background:var(--done);border-color:var(--done);color:#04201c}
   .ibtn.on.skip{background:var(--red);border-color:var(--red);color:#fff}
   .markers{font-size:11px;color:var(--accent);margin-top:2px}
+  .desc-icon{font-size:10px;margin-left:5px;opacity:.7;cursor:default}
   .slot-err{font-size:11px;color:var(--red);white-space:nowrap}
 
   .markers-panel{display:none;gap:6px;padding:8px 10px;background:var(--card);border:1px solid var(--border);border-top:0;border-radius:0 0 8px 8px;margin:-5px 0 5px;flex-wrap:wrap;align-items:center}
@@ -99,6 +109,7 @@
     <input type="date" id="from-date">
     <span style="color:var(--muted)">—</span>
     <input type="date" id="to-date">
+    <button id="today-btn" class="tab">Сьогодні</button>
   </div>
 
   <div class="tabs">
@@ -241,6 +252,8 @@ document.getElementById('passcode-input').addEventListener('keydown', e=>{
 let calEvents = {};
 let lastCalHash = null;
 const slotIndex = {}; // `${uid}|${start}` -> { ev, slotEl, doneBtn, skipBtn }
+const collapsedDays = new Set(); // dateKey -> collapsed (session-only, survives re-render)
+const expandedAllDay = new Set(); // dateKey -> all-day summary expanded (session-only, defaults collapsed)
 
 function loadRange(){
   try{ return JSON.parse(localStorage.getItem(RANGE_KEY)) || { from: DEFAULT_FROM, to: DEFAULT_TO }; }
@@ -259,6 +272,10 @@ const kyivTimeFmt = new Intl.DateTimeFormat('en-GB', { timeZone:'Europe/Kiev', h
 function isoToKyivLocal(iso){
   const d = new Date(iso);
   return `${kyivDateFmt.format(d)}T${kyivTimeFmt.format(d)}`;
+}
+function gcalDayUrl(iso){
+  const ymd = kyivDateFmt.format(new Date(iso)); // en-CA -> YYYY-MM-DD
+  return `https://calendar.google.com/calendar/u/0/r/day/${ymd.replaceAll('-', '/')}`;
 }
 function getTZOffsetMinutes(date, timeZone){
   const dtf = new Intl.DateTimeFormat('en-US', { timeZone, hour12:false, year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit' });
@@ -415,13 +432,57 @@ function render(){
 
   const dates = Object.keys(calEvents).sort();
   for(const dateKey of dates){
-    const slots = calEvents[dateKey].slice().sort((a,b)=>a.startMin-b.startMin);
+    const allSlots = calEvents[dateKey].slice().sort((a,b)=>a.startMin-b.startMin);
+    const allDaySlots = allSlots.filter(ev => ev.allDay);
+    const slots = allSlots.filter(ev => !ev.allDay);
+    const isCollapsed = collapsedDays.has(dateKey);
     const dayDiv = document.createElement('div');
-    dayDiv.className = 'day';
+    dayDiv.className = 'day' + (isCollapsed ? ' collapsed' : '');
+    dayDiv.dataset.date = dateKey;
     const title = document.createElement('div');
     title.className = 'day-title' + (dateKey===today ? ' today' : '');
-    title.textContent = fmtDay(new Date(dateKey+'T00:00:00'));
+    const chevron = document.createElement('span');
+    chevron.className = 'chevron';
+    chevron.textContent = '▾';
+    const titleText = document.createElement('span');
+    titleText.textContent = fmtDay(new Date(dateKey+'T00:00:00'));
+    title.append(chevron, titleText);
+    title.onclick = () => {
+      const nowCollapsed = dayDiv.classList.toggle('collapsed');
+      if(nowCollapsed) collapsedDays.add(dateKey); else collapsedDays.delete(dateKey);
+    };
     dayDiv.appendChild(title);
+
+    if(allDaySlots.length){
+      const isExpanded = expandedAllDay.has(dateKey);
+      const summary = document.createElement('div');
+      summary.className = 'allday-summary' + (isExpanded ? ' expanded' : '');
+      const adChevron = document.createElement('span');
+      adChevron.className = 'chevron';
+      adChevron.textContent = '▸';
+      const adText = document.createElement('span');
+      adText.textContent = `Цілий день (${allDaySlots.length})`;
+      summary.append(adChevron, adText);
+
+      const list = document.createElement('div');
+      list.className = 'allday-list';
+      allDaySlots.forEach(ev => {
+        const item = document.createElement('div');
+        item.textContent = ev.title;
+        list.appendChild(item);
+      });
+
+      summary.onclick = () => {
+        const nowExpanded = summary.classList.toggle('expanded');
+        if(nowExpanded) expandedAllDay.add(dateKey); else expandedAllDay.delete(dateKey);
+      };
+
+      dayDiv.append(summary, list);
+    }
+
+    const dayBody = document.createElement('div');
+    dayBody.className = 'day-body';
+    dayDiv.appendChild(dayBody);
 
     slots.forEach(ev => {
       const slotEl = document.createElement('div');
@@ -429,9 +490,19 @@ function render(){
       timeEl.textContent = fmtTime(ev.start) + '–' + fmtTime(ev.end);
       const labelEl = document.createElement('div'); labelEl.className='label';
       const titleSpan = document.createElement('div'); titleSpan.textContent = ev.title;
+      if(ev.description && ev.description.trim()){
+        const descIcon = document.createElement('span');
+        descIcon.className = 'desc-icon';
+        descIcon.textContent = '📝';
+        descIcon.title = ev.description;
+        titleSpan.appendChild(descIcon);
+      }
       const markersSpan = document.createElement('div'); markersSpan.className = 'markers';
       markersSpan.textContent = (ev.markers && ev.markers.length) ? ev.markers.join(' · ') : '';
       labelEl.append(titleSpan, markersSpan);
+      const openInCalendar = () => window.open(gcalDayUrl(ev.start), '_blank');
+      timeEl.onclick = openInCalendar;
+      labelEl.onclick = openInCalendar;
       const btnRow = document.createElement('div'); btnRow.className='btn-row';
 
       const doneBtn = document.createElement('button');
@@ -459,7 +530,7 @@ function render(){
 
       btnRow.append(doneBtn, skipBtn, pomoBtn, rescheduleBtn, markerBtn, deleteBtn);
       slotEl.append(timeEl, labelEl, btnRow);
-      dayDiv.appendChild(slotEl);
+      dayBody.appendChild(slotEl);
 
       const panel = document.createElement('div');
       panel.className = 'reschedule-panel';
@@ -470,7 +541,7 @@ function render(){
       const saveBtn = document.createElement('button'); saveBtn.className = 'save'; saveBtn.textContent = 'Зберегти';
       const cancelBtn = document.createElement('button'); cancelBtn.className = 'cancel'; cancelBtn.textContent = 'Скасувати';
       panel.append(startInput, endInput, saveBtn, cancelBtn);
-      dayDiv.appendChild(panel);
+      dayBody.appendChild(panel);
 
       rescheduleBtn.onclick = () => panel.classList.toggle('open');
       cancelBtn.onclick = () => panel.classList.remove('open');
@@ -510,7 +581,7 @@ function render(){
       markersPanel.append(tagInput, addTagBtn);
       renderChips();
       markerBtn.onclick = () => markersPanel.classList.toggle('open');
-      dayDiv.appendChild(markersPanel);
+      dayBody.appendChild(markersPanel);
 
       const entry = { ev, slotEl, doneBtn, skipBtn };
       slotIndex[slotKey(ev.uid, ev.start)] = entry;
@@ -569,6 +640,11 @@ document.querySelectorAll('.tab').forEach(tab => {
 
 document.getElementById('from-date').onchange = e => { const r=loadRange(); r.from=e.target.value; saveRange(r); loadCalendar(); };
 document.getElementById('to-date').onchange = e => { const r=loadRange(); r.to=e.target.value; saveRange(r); loadCalendar(); };
+document.getElementById('today-btn').onclick = () => {
+  const today = new Date().toISOString().slice(0,10);
+  const dayEl = document.querySelector('.day[data-date="' + today + '"]');
+  if(dayEl) dayEl.scrollIntoView({behavior:'smooth', block:'start'});
+};
 
 // ---- pomodoro ----
 let pomoActive = { active:false };
