@@ -118,6 +118,7 @@ async function calendarByDate(fromStr, toStr) {
   const events = await getEventsInRange(fromStr, toStr);
   const byDate = {};
   for (const e of events) {
+    if (e.allDay) continue; // all-day calendar entries aren't timed tasks — excluded from the tracker entirely
     const dateKey = dateFmt.format(e.start);
     const [sh, sm] = timeFmt.format(e.start).split(':').map(Number);
     const [eh, em] = timeFmt.format(e.end).split(':').map(Number);
@@ -130,8 +131,7 @@ async function calendarByDate(fromStr, toStr) {
       endMin: eh * 60 + em,
       title,
       status,
-      description: e.description || '',
-      allDay: e.allDay
+      description: e.description || ''
     });
   }
   return byDate;

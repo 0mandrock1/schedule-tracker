@@ -47,11 +47,6 @@
   .day.collapsed .day-title .chevron{transform:rotate(-90deg)}
   .day-body{display:flex;flex-direction:column}
   .day.collapsed .day-body{display:none}
-  .allday-summary{font-size:13px;color:var(--muted);cursor:pointer;display:flex;align-items:center;gap:6px;user-select:none;margin-bottom:4px}
-  .allday-summary .chevron{display:inline-block;transition:transform .15s;font-size:11px}
-  .allday-summary.expanded .chevron{transform:rotate(90deg)}
-  .allday-list{display:none;flex-direction:column;gap:2px;margin:2px 0 8px 18px;font-size:13px;color:var(--muted)}
-  .allday-summary.expanded + .allday-list{display:flex}
   .slot{display:flex;align-items:center;gap:10px;padding:9px 10px;background:var(--card);border:1px solid var(--border);border-radius:8px;margin-bottom:5px}
   .slot.done{opacity:.5}
   .slot.done .label{text-decoration:line-through}
@@ -253,7 +248,6 @@ let calEvents = {};
 let lastCalHash = null;
 const slotIndex = {}; // `${uid}|${start}` -> { ev, slotEl, doneBtn, skipBtn }
 const collapsedDays = new Set(); // dateKey -> collapsed (session-only, survives re-render)
-const expandedAllDay = new Set(); // dateKey -> all-day summary expanded (session-only, defaults collapsed)
 const seenPastDefault = new Set(); // dateKeys already defaulted to collapsed — lets a manual re-open stick across reloads
 
 function loadRange(){
@@ -440,9 +434,7 @@ function render(){
 
   const dates = Object.keys(calEvents).sort();
   for(const dateKey of dates){
-    const allSlots = calEvents[dateKey].slice().sort((a,b)=>a.startMin-b.startMin);
-    const allDaySlots = allSlots.filter(ev => ev.allDay);
-    const slots = allSlots.filter(ev => !ev.allDay);
+    const slots = calEvents[dateKey].slice().sort((a,b)=>a.startMin-b.startMin);
     const isCollapsed = collapsedDays.has(dateKey);
     const dayDiv = document.createElement('div');
     dayDiv.className = 'day' + (isCollapsed ? ' collapsed' : '');
@@ -460,33 +452,6 @@ function render(){
       if(nowCollapsed) collapsedDays.add(dateKey); else collapsedDays.delete(dateKey);
     };
     dayDiv.appendChild(title);
-
-    if(allDaySlots.length){
-      const isExpanded = expandedAllDay.has(dateKey);
-      const summary = document.createElement('div');
-      summary.className = 'allday-summary' + (isExpanded ? ' expanded' : '');
-      const adChevron = document.createElement('span');
-      adChevron.className = 'chevron';
-      adChevron.textContent = '▸';
-      const adText = document.createElement('span');
-      adText.textContent = `Цілий день (${allDaySlots.length})`;
-      summary.append(adChevron, adText);
-
-      const list = document.createElement('div');
-      list.className = 'allday-list';
-      allDaySlots.forEach(ev => {
-        const item = document.createElement('div');
-        item.textContent = ev.title;
-        list.appendChild(item);
-      });
-
-      summary.onclick = () => {
-        const nowExpanded = summary.classList.toggle('expanded');
-        if(nowExpanded) expandedAllDay.add(dateKey); else expandedAllDay.delete(dateKey);
-      };
-
-      dayDiv.append(summary, list);
-    }
 
     const dayBody = document.createElement('div');
     dayBody.className = 'day-body';

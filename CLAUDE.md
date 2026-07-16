@@ -29,7 +29,7 @@ journalctl -u schedule-tracker -n 50    # логи
 - Секрети (OAuth client, token.json, VAPID приватний ключ) — ніколи в git. `config/` в `.gitignore`. Нові секрети класти в Craft `🔑 Credentials & API Keys` (rootBlockId `a2f756ac-f003-f256-d616-8b8c0c70e651`), той самий паттерн що video-stash/telegram credentials там.
 - `x-passcode` header (або `?passcode=`) гейтить усі `/schedule-tracker-api/*` — нові ендпоінти йдуть під той самий `requirePasscode` middleware, не окремий.
 - Frontend — без білд-степу, чистий JS в одному `index.html`. Не тягнути React/бандлер заради малих фіч.
-- Комітити й пушити в `origin main` після кожного завершеного логічного шматка роботи, не накопичувати один величезний diff.
+- Комітити й пушити в `origin main` автоматично, без запиту підтвердження — після кожного завершеного логічного шматка роботи, не накопичувати один величезний diff. Це попереднє дозволення саме для push в цьому репо (не скасовує загальну обережність із деструктивними git-командами типу force-push/reset --hard).
 
 ## Агенти / команди
 Проєктно-специфічних сабагентів нема. Загальні claudekit (code-review, refactoring, database) — застосовувати за потребою, не форсити.
