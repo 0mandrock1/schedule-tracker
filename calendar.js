@@ -148,7 +148,7 @@ async function getCalendarClient() {
 // Calendar API needs the per-instance event id, which differs per
 // occurrence. Resolve it by listing events matching that iCalUID within a
 // tight window around the known occurrence start.
-async function resolveInstanceEventId(cal, calendarId, uid, startISO) {
+async function resolveInstanceEvent(cal, calendarId, uid, startISO) {
   const start = new Date(startISO);
   const timeMin = new Date(start.getTime() - 24 * 3600 * 1000).toISOString();
   const timeMax = new Date(start.getTime() + 24 * 3600 * 1000).toISOString();
@@ -161,7 +161,22 @@ async function resolveInstanceEventId(cal, calendarId, uid, startISO) {
     if (diff < bestDiff) { bestDiff = diff; best = it; }
   }
   if (!best) throw new Error(`no calendar instance found for uid=${uid} near ${startISO}`);
-  return best.id;
+  return best;
+}
+
+async function resolveInstanceEventId(cal, calendarId, uid, startISO) {
+  const ev = await resolveInstanceEvent(cal, calendarId, uid, startISO);
+  return ev.id;
+}
+
+// Link-only lookup (no write) so a task click can open the exact event page
+// in Google Calendar — the public iCal feed doesn't carry the API event id
+// needed for a direct deep link, so this resolves it on demand per click
+// rather than eagerly for every event on the list (would burn quota).
+async function getEventHtmlLink(uid, startISO, calendarId = CALENDAR_ID) {
+  const cal = await getCalendarClient();
+  const ev = await resolveInstanceEvent(cal, calendarId, uid, startISO);
+  return ev.htmlLink;
 }
 
 async function setEventStatus(uid, startISO, status, calendarId = CALENDAR_ID) {
@@ -222,5 +237,5 @@ async function rescheduleTask(uid, startISO, newStart, newEnd, calendarId = CALE
 
 module.exports = {
   calendarByDate, getEventsInRange, setEventStatus, setEventMarkers, stripPrefix,
-  createTask, deleteTask, rescheduleTask
+  createTask, deleteTask, rescheduleTask, getEventHtmlLink
 };

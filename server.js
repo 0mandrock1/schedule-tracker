@@ -3,7 +3,7 @@ const fs = require('fs');
 const express = require('express');
 const path = require('path');
 const { db, importLegacy } = require('./db');
-const { calendarByDate, setEventStatus, setEventMarkers, createTask, deleteTask, rescheduleTask } = require('./calendar');
+const { calendarByDate, setEventStatus, setEventMarkers, createTask, deleteTask, rescheduleTask, getEventHtmlLink } = require('./calendar');
 const { exchangeCode } = require('./auth');
 const pomodoro = require('./pomodoro');
 
@@ -112,6 +112,17 @@ app.patch('/schedule-tracker-api/task/:uid', async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     res.status(502).json({ error: 'reschedule failed', detail: err.message });
+  }
+});
+
+app.get('/schedule-tracker-api/event-link', async (req, res) => {
+  const { uid, start } = req.query;
+  if (!uid || !start) return res.status(400).json({ error: 'uid, start required' });
+  try {
+    const url = await getEventHtmlLink(uid, start);
+    res.json({ url });
+  } catch (err) {
+    res.status(502).json({ error: 'lookup failed', detail: err.message });
   }
 });
 

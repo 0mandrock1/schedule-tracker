@@ -254,6 +254,7 @@ let lastCalHash = null;
 const slotIndex = {}; // `${uid}|${start}` -> { ev, slotEl, doneBtn, skipBtn }
 const collapsedDays = new Set(); // dateKey -> collapsed (session-only, survives re-render)
 const expandedAllDay = new Set(); // dateKey -> all-day summary expanded (session-only, defaults collapsed)
+const seenPastDefault = new Set(); // dateKeys already defaulted to collapsed — lets a manual re-open stick across reloads
 
 function loadRange(){
   try{ return JSON.parse(localStorage.getItem(RANGE_KEY)) || { from: DEFAULT_FROM, to: DEFAULT_TO }; }
@@ -370,6 +371,13 @@ async function loadCalendar(){
   if(hash === lastCalHash) return; // server state matches what's already on screen — skip DOM rebuild
   lastCalHash = hash;
   calEvents = data;
+  const today = new Date().toISOString().slice(0,10);
+  for(const dateKey in calEvents){
+    if(dateKey < today && !seenPastDefault.has(dateKey)){
+      collapsedDays.add(dateKey);
+      seenPastDefault.add(dateKey);
+    }
+  }
   render();
 }
 
@@ -490,7 +498,9 @@ function render(){
       timeEl.textContent = fmtTime(ev.start) + '–' + fmtTime(ev.end);
       const labelEl = document.createElement('div'); labelEl.className='label';
       const titleSpan = document.createElement('div'); titleSpan.textContent = ev.title;
-      if(ev.description && ev.description.trim()){
+      const descTrimmed = (ev.description || '').trim();
+      const isJustALink = /^\S+$/.test(descTrimmed) && /^https?:\/\//i.test(descTrimmed);
+      if(descTrimmed && !isJustALink){
         const descIcon = document.createElement('span');
         descIcon.className = 'desc-icon';
         descIcon.textContent = '📝';
@@ -500,7 +510,13 @@ function render(){
       const markersSpan = document.createElement('div'); markersSpan.className = 'markers';
       markersSpan.textContent = (ev.markers && ev.markers.length) ? ev.markers.join(' · ') : '';
       labelEl.append(titleSpan, markersSpan);
-      const openInCalendar = () => window.open(gcalDayUrl(ev.start), '_blank');
+      const openInCalendar = () => {
+        const win = window.open('', '_blank');
+        apiFetch(`/event-link?uid=${encodeURIComponent(ev.uid)}&start=${encodeURIComponent(ev.start)}`)
+          .then(r => r.ok ? r.json() : Promise.reject())
+          .then(data => { win.location = data.url || gcalDayUrl(ev.start); })
+          .catch(() => { win.location = gcalDayUrl(ev.start); });
+      };
       timeEl.onclick = openInCalendar;
       labelEl.onclick = openInCalendar;
       const btnRow = document.createElement('div'); btnRow.className='btn-row';
