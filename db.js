@@ -52,7 +52,72 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
   subscription TEXT NOT NULL,
   createdAt TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS projects (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  emoji TEXT,
+  cluster TEXT,
+  mode TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active',
+  last_touch TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS captures (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  day DATE UNIQUE NOT NULL,
+  projects_json TEXT NOT NULL DEFAULT '[]',
+  energy INTEGER,
+  note TEXT,
+  tomorrow TEXT,
+  voice_path TEXT,
+  transcript TEXT,
+  closed_at TEXT,
+  source TEXT NOT NULL DEFAULT 'api'
+);
+
+CREATE TABLE IF NOT EXISTS parked_reviews (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id INTEGER NOT NULL,
+  asked_at TEXT NOT NULL DEFAULT (datetime('now')),
+  answer TEXT
+);
+
+CREATE TABLE IF NOT EXISTS dashboard_opens (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  opened_at TEXT NOT NULL DEFAULT (datetime('now')),
+  ua TEXT
+);
 `);
+
+// Seed the project map once — the old Craft "Меню дня — ротація тем" doc is retired in
+// favor of this table (see Phase 1 of the 2026-07-31 rewrite). Emoji doubles as a cluster
+// tag within `head` (💻 general software/agents, 🖥 CAD-adjacent).
+const PROJECT_SEED = [
+  { name: 'Embedded (Lilka+Raspberry)', emoji: '🔌', cluster: 'hands', mode: 'hands' },
+  { name: 'Паяльник/ремонт', emoji: '🔌', cluster: 'hands', mode: 'hands' },
+  { name: 'Задній двір/фізична робота', emoji: '🔌', cluster: 'hands', mode: 'hands' },
+  { name: 'KB (Craft)', emoji: '💻', cluster: 'software', mode: 'head' },
+  { name: 'Skills/агенти', emoji: '💻', cluster: 'software', mode: 'head' },
+  { name: 'Livecoding Hydra/Strudel', emoji: '💻', cluster: 'software', mode: 'head' },
+  { name: "Кар'єра (пошук роботи/інтерв'ю/резюме/портфоліо)", emoji: '💻', cluster: 'software', mode: 'head' },
+  { name: 'AV-проєкти (lumen-engine, sonargale, VR, EarForge)', emoji: '💻', cluster: 'software', mode: 'head' },
+  { name: 'Контент (курс Bitwig, релізи, канал)', emoji: '💻', cluster: 'software', mode: 'head' },
+  { name: 'Onshape/Blender', emoji: '🖥', cluster: 'cad', mode: 'head' },
+  { name: 'Альбом — мастеринг', emoji: '🎛', cluster: 'mastering', mode: 'ears' },
+  { name: 'Деки/діджеїнг', emoji: '🎧', cluster: 'dj', mode: 'ears' },
+];
+
+function seedProjects() {
+  const count = db.prepare('SELECT COUNT(*) as n FROM projects').get().n;
+  if (count > 0) return 0;
+  const insert = db.prepare('INSERT INTO projects (name, emoji, cluster, mode) VALUES (?, ?, ?, ?)');
+  const tx = db.transaction((rows) => { for (const r of rows) insert.run(r.name, r.emoji, r.cluster, r.mode); });
+  tx(PROJECT_SEED);
+  return PROJECT_SEED.length;
+}
+seedProjects();
 
 // pomodoro_log predates the phase/cycleCount columns — add them if missing (idempotent across restarts).
 const pomodoroLogCols = db.prepare("PRAGMA table_info(pomodoro_log)").all().map(c => c.name);

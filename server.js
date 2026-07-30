@@ -3,9 +3,10 @@ const fs = require('fs');
 const express = require('express');
 const path = require('path');
 const { db, importLegacy } = require('./db');
-const { calendarByDate, setEventStatus, setEventMarkers, createTask, deleteTask, rescheduleTask, getEventHtmlLink } = require('./calendar');
+const { calendarByDate, setEventStatus, setEventMarkers, createTask, deleteTask, rescheduleTask, getEventHtmlLink, getMeetingsInRange } = require('./calendar');
 const { exchangeCode } = require('./auth');
 const pomodoro = require('./pomodoro');
+const store = require('./store');
 
 const TOKEN_FILE = path.join(__dirname, 'config', 'token.json');
 
@@ -210,6 +211,92 @@ app.post('/schedule-tracker-api/push/subscribe', (req, res) => {
   res.json({ ok: true });
 });
 
+// ---- own store: projects/captures (source of truth, replaces Calendar task-status) ----
+
+app.get('/schedule-tracker-api/projects', (req, res) => {
+  const { status, mode } = req.query;
+  res.json(store.listProjects({ status, mode }));
+});
+
+app.post('/schedule-tracker-api/projects', (req, res) => {
+  try {
+    res.json(store.createProject(req.body || {}));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.patch('/schedule-tracker-api/projects/:id', (req, res) => {
+  try {
+    res.json(store.patchProject(Number(req.params.id), req.body || {}));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/schedule-tracker-api/projects/menu', (req, res) => {
+  try {
+    res.json(store.projectsMenu(req.query.mode));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/schedule-tracker-api/capture', (req, res) => {
+  try {
+    res.json(store.upsertCapture(req.body || {}));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/schedule-tracker-api/capture', (req, res) => {
+  const { day } = req.query;
+  if (!day) return res.status(400).json({ error: 'day required (YYYY-MM-DD)' });
+  res.json(store.getCapture(day));
+});
+
+app.get('/schedule-tracker-api/stats', (req, res) => {
+  res.json(store.stats());
+});
+
+app.get('/schedule-tracker-api/day', (req, res) => {
+  try {
+    res.json(store.getDay(req.query.mode));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/schedule-tracker-api/dashboard-open', (req, res) => {
+  store.recordDashboardOpen(req.get('user-agent'));
+  res.json({ ok: true });
+});
+
+app.get('/schedule-tracker-api/parked-reviews/next', (req, res) => {
+  const n = Number(req.query.n) || 2;
+  res.json(store.pickParkedForReview(n));
+});
+
+app.post('/schedule-tracker-api/parked-reviews', (req, res) => {
+  const { project_id, answer } = req.body || {};
+  if (!project_id || !['alive', 'sleeping', 'dead'].includes(answer)) {
+    return res.status(400).json({ error: 'project_id, answer(alive|sleeping|dead) required' });
+  }
+  store.recordParkedReview(project_id, answer);
+  res.json({ ok: true });
+});
+
+app.get('/schedule-tracker-api/meetings', async (req, res) => {
+  const hours = Number(req.query.hours) || 24;
+  try {
+    const meetings = await getMeetingsInRange(hours);
+    res.json(meetings);
+  } catch (err) {
+    res.status(502).json({ error: 'meetings fetch failed', detail: err.message });
+  }
+});
+
 app.get('/oauth/callback', async (req, res) => {
   if (fs.existsSync(TOKEN_FILE)) {
     return res.status(403).send('Already authorized. Delete config/token.json on the server to re-run setup.');
@@ -235,6 +322,11 @@ app.listen(PORT, '127.0.0.1', () => {
 // Advances pomodoro phases (and fires push notifications) even when nobody is
 // polling /pomodoro/active — otherwise "start on phone, walk away" never notifies.
 setInterval(() => pomodoro.checkAndAdvance(true), 5000);
+
+// Parks active projects untouched for 14+ days. Runs at startup and once a day —
+// systemd keeps this process running for weeks, a plain setInterval is enough.
+store.parkStaleProjects();
+setInterval(() => store.parkStaleProjects(), 24 * 3600 * 1000);
 
 // Keeps the event loop alive under process supervisors (systemd) that were
 // observed letting the loop drain immediately after listen() despite the

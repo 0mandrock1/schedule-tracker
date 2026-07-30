@@ -100,15 +100,34 @@ async function getEventsInRange(fromStr, toStr) {
           }
         }
         const realStart = new Date(o.getTime() + correction);
-        results.push({ uid: ev.uid, start: realStart, end: new Date(realStart.getTime() + duration), summary, description, colorId: ev.color || null, allDay });
+        results.push({ uid: ev.uid, start: realStart, end: new Date(realStart.getTime() + duration), summary, description, colorId: ev.color || null, allDay, hasAttendees: Boolean(ev.attendee) });
       }
     } else {
       if (ev.start < rangeEnd && ev.end > rangeStart) {
-        results.push({ uid: ev.uid, start: ev.start, end: ev.end, summary: ev.summary, description: descOf(ev.description), colorId: ev.color || null, allDay });
+        results.push({ uid: ev.uid, start: ev.start, end: ev.end, summary: ev.summary, description: descOf(ev.description), colorId: ev.color || null, allDay, hasAttendees: Boolean(ev.attendee) });
       }
     }
   }
   return results;
+}
+
+// ---- meetings (the only thing Calendar remains source-of-truth for, post-2026-07-31) ----
+// A "real meeting" is an event with attendees or an explicit [meet] tag in the title —
+// everything else in the calendar is noise from the retired task-tracking era.
+function isMeeting(ev) {
+  return Boolean(ev.hasAttendees) || /\[meet\]/i.test(ev.summary || '');
+}
+
+async function getMeetingsInRange(hours = 24) {
+  const now = new Date();
+  const fromStr = dateFmt.format(now);
+  const toStr = dateFmt.format(new Date(now.getTime() + hours * 3600 * 1000));
+  const events = await getEventsInRange(fromStr, toStr);
+  const rangeEnd = new Date(now.getTime() + hours * 3600 * 1000);
+  return events
+    .filter(e => !e.allDay && isMeeting(e) && e.start >= now && e.start <= rangeEnd)
+    .map(e => ({ uid: e.uid, start: e.start.toISOString(), end: e.end.toISOString(), summary: e.summary, description: e.description || '' }))
+    .sort((a, b) => a.start.localeCompare(b.start));
 }
 
 const dateFmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Kiev', year: 'numeric', month: '2-digit', day: '2-digit' });
@@ -237,5 +256,5 @@ async function rescheduleTask(uid, startISO, newStart, newEnd, calendarId = CALE
 
 module.exports = {
   calendarByDate, getEventsInRange, setEventStatus, setEventMarkers, stripPrefix,
-  createTask, deleteTask, rescheduleTask, getEventHtmlLink
+  createTask, deleteTask, rescheduleTask, getEventHtmlLink, getMeetingsInRange
 };
