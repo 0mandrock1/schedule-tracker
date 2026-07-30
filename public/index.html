@@ -5,86 +5,44 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Schedule Tracker</title>
 <style>
-  :root{--bg:#0e0e0e;--card:#1a1a1a;--border:#2c2c2a;--text:#e8e6e0;--muted:#888780;--accent:#2bb3a3;--done:#2bb3a3;--red:#c04040}
+  :root{--bg:#0e0e0e;--card:#1a1a1a;--border:#2c2c2a;--text:#e8e6e0;--muted:#888780;--accent:#2bb3a3;--red:#c04040}
   *{box-sizing:border-box}
-  body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:0;padding:20px 14px 100px;max-width:760px;margin-inline:auto}
+  body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:0;padding:20px 14px 60px;max-width:760px;margin-inline:auto}
   h1{font-size:20px;font-weight:500;margin:0 0 4px}
+  h3{margin:0 0 10px;font-size:14px;font-weight:600}
   .sub{color:var(--muted);font-size:13px;margin:0 0 16px}
-  a{color:var(--accent)}
 
   #gate{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;z-index:1000}
   #gate input{background:var(--card);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:12px 14px;font-size:16px;text-align:center;width:200px}
   #gate button{background:var(--accent);border:0;color:#04201c;font-weight:600;border-radius:8px;padding:10px 20px;font-size:14px;cursor:pointer}
   #gate .err{color:var(--red);font-size:13px;min-height:16px}
 
-  .toolbar{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center}
-  .toolbar input[type=date]{background:var(--card);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:6px 8px;font-size:13px}
-
-  .task-form{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:10px}
-  .task-form input{background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:6px 8px;font-size:13px}
-  .task-form input[type=text]{flex:1;min-width:140px}
-  .task-form button{background:var(--accent);border:0;color:#04201c;border-radius:8px;padding:6px 14px;font-size:13px;cursor:pointer;font-weight:600}
-
-  .reschedule-panel{display:none;gap:6px;padding:8px 10px;background:var(--card);border:1px solid var(--border);border-top:0;border-radius:0 0 8px 8px;margin:-5px 0 5px;flex-wrap:wrap;align-items:center}
-  .reschedule-panel.open{display:flex}
-  .reschedule-panel input{background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 6px;font-size:12px}
-  .reschedule-panel button{border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer}
-  .reschedule-panel .save{background:var(--accent);border:0;color:#04201c;font-weight:600}
-  .reschedule-panel .cancel{background:transparent;border:1px solid var(--border);color:var(--muted)}
-  .tabs{display:flex;gap:6px;margin-bottom:16px}
+  .tabs{display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap}
   .tab{background:var(--card);border:1px solid var(--border);color:var(--muted);border-radius:8px;padding:6px 14px;font-size:13px;cursor:pointer}
   .tab.active{color:var(--text);border-color:var(--accent)}
 
-  .progress-wrap{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:16px}
-  .stats{display:flex;justify-content:space-between;font-size:13px;color:var(--muted)}
-  .progress-bar{height:8px;background:#2c2c2a;border-radius:4px;overflow:hidden;margin-top:8px}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:14px}
+  .stats-row{display:flex;justify-content:space-between;font-size:13px;color:var(--muted);margin-bottom:8px}
+  .progress-bar{height:8px;background:#2c2c2a;border-radius:4px;overflow:hidden}
   .progress-fill{height:100%;background:var(--accent);transition:width .3s}
 
-  .day{margin-bottom:18px}
-  .day-title{font-size:14px;font-weight:500;margin-bottom:6px;color:var(--muted);cursor:pointer;display:flex;align-items:center;gap:6px;user-select:none}
-  .day-title.today{color:var(--accent)}
-  .day-title .chevron{display:inline-block;transition:transform .15s;font-size:11px}
-  .day.collapsed .day-title .chevron{transform:rotate(-90deg)}
-  .day-body{display:flex;flex-direction:column}
-  .day.collapsed .day-body{display:none}
-  .slot{display:flex;align-items:center;gap:10px;padding:9px 10px;background:var(--card);border:1px solid var(--border);border-radius:8px;margin-bottom:5px}
-  .slot.done{opacity:.5}
-  .slot.done .label{text-decoration:line-through}
-  .slot.skipped{opacity:.5}
-  .slot.skipped .label{text-decoration:line-through;color:var(--red)}
-  .time{font-size:11px;color:var(--muted);min-width:80px;cursor:pointer}
-  .label{font-size:13px;flex:1;cursor:pointer}
-  .btn-row{display:flex;gap:4px;flex-shrink:0}
-  .ibtn{width:24px;height:24px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center}
-  .ibtn.on.done{background:var(--done);border-color:var(--done);color:#04201c}
-  .ibtn.on.skip{background:var(--red);border-color:var(--red);color:#fff}
-  .markers{font-size:11px;color:var(--accent);margin-top:2px}
-  .desc-icon{font-size:10px;margin-left:5px;opacity:.7;cursor:default}
-  .slot-err{font-size:11px;color:var(--red);white-space:nowrap}
+  .day{margin-bottom:10px;padding:10px 12px;background:var(--card);border:1px solid var(--border);border-radius:10px}
+  .day-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px}
+  .day-date{font-size:13px;font-weight:600}
+  .day-energy{font-size:12px;color:var(--accent)}
+  .day-projects{display:flex;flex-wrap:wrap;gap:5px;margin:4px 0}
+  .chip{background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:12px;padding:2px 8px;font-size:11px}
+  .day-note{font-size:12px;color:var(--muted);margin-top:4px;line-height:1.5}
+  .day-tomorrow{font-size:12px;color:var(--muted);margin-top:2px}
+  .empty{color:var(--muted);font-size:13px}
 
-  .markers-panel{display:none;gap:6px;padding:8px 10px;background:var(--card);border:1px solid var(--border);border-top:0;border-radius:0 0 8px 8px;margin:-5px 0 5px;flex-wrap:wrap;align-items:center}
-  .markers-panel.open{display:flex}
-  .markers-panel input{background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 6px;font-size:12px;flex:1;min-width:80px}
-  .markers-panel button{background:var(--accent);border:0;color:#04201c;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;font-weight:600}
-  .chip{background:var(--bg);border:1px solid var(--accent);color:var(--accent);border-radius:12px;padding:2px 6px 2px 8px;font-size:11px;display:inline-flex;align-items:center;gap:4px}
-  .chip .x{cursor:pointer;color:var(--muted);font-weight:700}
-
-  #counter table{width:100%;border-collapse:collapse;font-size:13px}
-  #counter td,#counter th{padding:6px 4px;border-bottom:1px solid var(--border);text-align:left}
-
-  #pomo{position:fixed;bottom:14px;right:14px;left:14px;max-width:460px;margin-inline:auto;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px 16px;display:flex;align-items:center;gap:10px;font-size:14px;flex-wrap:wrap}
-  #pomo .pomo-info{flex:1;min-width:80px}
-  #pomo .pomo-phase{font-size:12px;color:var(--accent);font-weight:600}
-  #pomo .pomo-task{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:140px}
-  #pomo .time-display{font-variant-numeric:tabular-nums;font-size:20px;min-width:64px}
-  #pomo button{background:var(--accent);border:0;color:#04201c;border-radius:8px;padding:8px 14px;font-size:13px;cursor:pointer;font-weight:600}
-  #pomo button.secondary{background:transparent;border:1px solid var(--border);color:var(--muted)}
-
-  @media (max-width:480px){
-    body{padding:14px 8px 110px}
-    .time{min-width:64px;font-size:10px}
-    .label{font-size:12px}
-  }
+  .proj-group{margin-bottom:14px}
+  .proj-group-title{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.03em;margin-bottom:6px}
+  .proj-row{display:flex;justify-content:space-between;align-items:center;padding:7px 10px;background:var(--bg);border:1px solid var(--border);border-radius:8px;margin-bottom:5px;font-size:13px}
+  .proj-meta{color:var(--muted);font-size:11px}
+  .status-active{color:var(--accent)}
+  .status-parked{color:#c9a24b}
+  .status-dead{color:var(--muted);text-decoration:line-through}
 </style>
 </head>
 <body>
@@ -98,109 +56,50 @@
 
 <div id="app" style="display:none">
   <h1>Schedule Tracker</h1>
-  <p class="sub">Google Calendar — джерело правди</p>
-
-  <div class="toolbar">
-    <input type="date" id="from-date">
-    <span style="color:var(--muted)">—</span>
-    <input type="date" id="to-date">
-    <button id="today-btn" class="tab">Сьогодні</button>
-  </div>
+  <p class="sub">Read-only. Джерело правди — власний стор (projects/captures), не Google Calendar.</p>
 
   <div class="tabs">
-    <div class="tab active" data-tab="days">Дні</div>
-    <div class="tab" data-tab="counter">Лічильник</div>
+    <div class="tab active" data-tab="history">Історія</div>
+    <div class="tab" data-tab="projects">Проєкти</div>
     <div class="tab" data-tab="about">Про</div>
   </div>
 
-  <div class="progress-wrap">
-    <div class="stats"><span id="stat-text">0 / 0 виконано</span><span id="stat-pct">0%</span></div>
-    <div class="progress-bar"><div class="progress-fill" id="progress-fill" style="width:0%"></div></div>
+  <div id="history">
+    <div class="card">
+      <div class="stats-row"><span id="coverage-text">capture: 0 з 30</span><span id="coverage-pct">0%</span></div>
+      <div class="progress-bar"><div class="progress-fill" id="coverage-fill" style="width:0%"></div></div>
+      <div class="stats-row" style="margin-top:8px;margin-bottom:0"><span>Середня енергія</span><span id="avg-energy">—</span></div>
+    </div>
+    <div id="days-list"></div>
   </div>
 
-  <div class="task-form">
-    <input type="text" id="task-title" placeholder="Нова задача">
-    <input type="datetime-local" id="task-start">
-    <input type="datetime-local" id="task-end">
-    <button id="task-add-submit">Додати</button>
-  </div>
-
-  <div id="days"></div>
-
-  <div id="counter" style="display:none">
-    <div class="progress-wrap">
-      <h3 style="margin-top:0">Живі дані (з поточного sqlite-кешу)</h3>
-      <table id="live-table"><thead><tr><th>Статус</th><th>К-сть</th></tr></thead><tbody></tbody></table>
-    </div>
-    <div class="progress-wrap">
-      <h3 style="margin-top:0">Legacy історія (до 2026-07-13)</h3>
-      <table id="legacy-table"><thead><tr><th>Статус</th><th>К-сть</th></tr></thead><tbody></tbody></table>
-    </div>
-    <div class="progress-wrap">
-      <h3 style="margin-top:0">Фокус-час по задачах (pomodoro)</h3>
-      <table id="focus-table"><thead><tr><th>Задача</th><th>Хв</th><th>Сесій</th></tr></thead><tbody></tbody></table>
-    </div>
+  <div id="projects" style="display:none">
+    <div id="projects-list"></div>
   </div>
 
   <div id="about" style="display:none">
-    <div class="progress-wrap">
-      <h3 style="margin-top:0">Що це</h3>
+    <div class="card">
+      <h3>Що це</h3>
       <p style="font-size:13px;line-height:1.6">
-        Трекер задач, де <b>джерело правди — твій Google Calendar</b>, а не окрема база даних.
-        Кожна подія календаря — це задача. Немає окремого "стану" в застосунку: клік ✓ чи ✕
-        одразу міняє тайтл події (додає префікс <code>✅ </code>/<code>❌ </code>) і її колір
-        прямо в Google Calendar. Відкрий той самий календар в іншому клієнті — побачиш той самий
-        статус.
+        Персональний трекер тем/проєктів. Раз на добу (00:00 Kyiv, через Telegram-бота)
+        фіксується, що торкнув сьогодні, енергія 1-5 і одна річ на завтра. Джерело правди —
+        власна база (таблиці <code>projects</code>/<code>captures</code>), не Google Calendar —
+        Calendar лишився тільки для читання реальних зустрічей.
       </p>
     </div>
-    <div class="progress-wrap">
-      <h3 style="margin-top:0">Як працює статус</h3>
+    <div class="card">
+      <h3>Ця сторінка</h3>
       <p style="font-size:13px;line-height:1.6">
-        ✓ позначає задачу виконаною, ✕ — пропущеною, повторний клік повертає її в очікування.
-        Зміна застосовується миттєво в інтерфейсі (не чекає відповіді сервера) і синхронізується
-        з календарем у фоні. 🏷 додає довільні теги (не змінює статус) — зручно для позначок
-        типу "терміново" чи "чекає".
-      </p>
-    </div>
-    <div class="progress-wrap">
-      <h3 style="margin-top:0">Як працює pomodoro</h3>
-      <p style="font-size:13px;line-height:1.6">
-        Стандартний цикл: 25 хв роботи → 5 хв перерви, повторюється тричі, потім довга
-        15-хвилинна перерва — і цикл починається знову. Таймер прив'язується до конкретної
-        задачі кнопкою ⏱ (для аналітики фокус-часу в "Лічильник") або можна почати без
-        прив'язки. Стан циклу зберігається на сервері, тож перезавантаження сторінки чи
-        рестарт сервісу не скидають таймер. За бажанням дозволь push-нотифікації при першому
-        старті — прийде сповіщення про зміну фази, навіть якщо вкладку закрито.
-      </p>
-    </div>
-    <div class="progress-wrap">
-      <h3 style="margin-top:0">Пароль</h3>
-      <p style="font-size:13px;line-height:1.6">
-        Доступ до трекера захищено спільним паролем (не Google-акаунтом). Якщо загубив —
-        запитай у власника сервера.
+        Read-only дашборд: покриття (скільки днів із останніх 30 закрито), історія по днях,
+        і список проєктів по статусах (active/parked/dead). Редагування — тільки через бота
+        або напряму API.
       </p>
     </div>
   </div>
-</div>
-
-<div id="pomo" style="display:none">
-  <div class="pomo-info">
-    <div class="pomo-phase" id="pomo-phase"></div>
-    <div class="pomo-task" id="pomo-task"></div>
-  </div>
-  <div class="time-display" id="pomo-time">25:00</div>
-  <button id="pomo-start">Старт</button>
-  <button class="secondary" id="pomo-pause" style="display:none">Пауза</button>
-  <button class="secondary" id="pomo-resume" style="display:none">Продовжити</button>
-  <button class="secondary" id="pomo-skip" style="display:none">⏭</button>
-  <button class="secondary" id="pomo-stop" style="display:none">Стоп</button>
 </div>
 
 <script>
 const API = '/schedule-tracker-api';
-const DEFAULT_FROM = '2026-07-02';
-const DEFAULT_TO = '2026-08-31';
-const RANGE_KEY = 'st_range_v1';
 const PASS_KEY = 'st_passcode';
 
 function apiFetch(path, opts={}){
@@ -209,10 +108,9 @@ function apiFetch(path, opts={}){
   return fetch(API+path, opts);
 }
 
-// ---- passcode gate ----
 async function tryPasscode(code){
   sessionStorage.setItem(PASS_KEY, code);
-  const r = await apiFetch('/counter');
+  const r = await apiFetch('/stats');
   if(r.status === 401){ sessionStorage.removeItem(PASS_KEY); return false; }
   return true;
 }
@@ -223,7 +121,6 @@ document.getElementById('gate-submit').onclick = async () => {
   if(ok){
     document.getElementById('gate').style.display = 'none';
     document.getElementById('app').style.display = '';
-    document.getElementById('pomo').style.display = 'flex';
     init();
   } else {
     document.getElementById('gate-err').textContent = 'Невірний код';
@@ -233,531 +130,89 @@ document.getElementById('passcode-input').addEventListener('keydown', e=>{
   if(e.key === 'Enter') document.getElementById('gate-submit').click();
 });
 
-(async function boot(){
-  const cached = sessionStorage.getItem(PASS_KEY);
-  if(cached !== null && await tryPasscode(cached)){
-    document.getElementById('gate').style.display = 'none';
-    document.getElementById('app').style.display = '';
-    document.getElementById('pomo').style.display = 'flex';
-    init();
-  }
-})();
-
-// ---- main app ----
-let calEvents = {};
-let lastCalHash = null;
-const slotIndex = {}; // `${uid}|${start}` -> { ev, slotEl, doneBtn, skipBtn }
-const collapsedDays = new Set(); // dateKey -> collapsed (session-only, survives re-render)
-const seenPastDefault = new Set(); // dateKeys already defaulted to collapsed — lets a manual re-open stick across reloads
-
-function loadRange(){
-  try{ return JSON.parse(localStorage.getItem(RANGE_KEY)) || { from: DEFAULT_FROM, to: DEFAULT_TO }; }
-  catch(e){ return { from: DEFAULT_FROM, to: DEFAULT_TO }; }
-}
-function saveRange(r){ localStorage.setItem(RANGE_KEY, JSON.stringify(r)); }
-
-function fmtDay(d){ return d.toLocaleDateString('uk-UA',{weekday:'short',day:'2-digit',month:'2-digit'}); }
-function fmtTime(iso){ return new Date(iso).toLocaleTimeString('uk-UA',{hour:'2-digit',minute:'2-digit',timeZone:'Europe/Kiev'}); }
-function slotKey(uid, start){ return uid + '|' + start; }
-
-// ---- Europe/Kiev <-> naive datetime-local conversion (server stores/reads everything in Kyiv wall-clock terms) ----
-const kyivDateFmt = new Intl.DateTimeFormat('en-CA', { timeZone:'Europe/Kiev', year:'numeric', month:'2-digit', day:'2-digit' });
-const kyivTimeFmt = new Intl.DateTimeFormat('en-GB', { timeZone:'Europe/Kiev', hour:'2-digit', minute:'2-digit', hour12:false });
-
-function isoToKyivLocal(iso){
-  const d = new Date(iso);
-  return `${kyivDateFmt.format(d)}T${kyivTimeFmt.format(d)}`;
-}
-function gcalDayUrl(iso){
-  const ymd = kyivDateFmt.format(new Date(iso)); // en-CA -> YYYY-MM-DD
-  return `https://calendar.google.com/calendar/u/0/r/day/${ymd.replaceAll('-', '/')}`;
-}
-function getTZOffsetMinutes(date, timeZone){
-  const dtf = new Intl.DateTimeFormat('en-US', { timeZone, hour12:false, year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit' });
-  const p = dtf.formatToParts(date).reduce((acc,x)=>{acc[x.type]=x.value;return acc;},{});
-  const asUTC = Date.UTC(p.year, p.month-1, p.day, p.hour==='24'?0:p.hour, p.minute, p.second);
-  return (asUTC - date.getTime())/60000;
-}
-function kyivLocalToISO(localValue){
-  const guessUtc = new Date(localValue + ':00Z');
-  const offsetMin = getTZOffsetMinutes(guessUtc, 'Europe/Kiev');
-  return new Date(guessUtc.getTime() - offsetMin*60000).toISOString();
-}
-
-// ---- optimistic local mutations for add/delete/reschedule — the public iCal feed Google exposes
-// lags real-time writes by more than our own icalCache TTL, so we don't wait on a refetch to reflect them ----
-function insertLocalEvent({ uid, start, end, title }){
-  const startD = new Date(start), endD = new Date(end);
-  const dateKey = kyivDateFmt.format(startD);
-  const [sh,sm] = kyivTimeFmt.format(startD).split(':').map(Number);
-  const [eh,em] = kyivTimeFmt.format(endD).split(':').map(Number);
-  const ev = { uid, start, end, startMin: sh*60+sm, endMin: eh*60+em, title, status:'pending', description:'' };
-  (calEvents[dateKey] = calEvents[dateKey] || []).push(ev);
-  lastCalHash = JSON.stringify(calEvents);
-  render();
-}
-function removeLocalEvent(uid, start){
-  for(const dateKey in calEvents){
-    const idx = calEvents[dateKey].findIndex(e=>e.uid===uid && e.start===start);
-    if(idx !== -1){
-      calEvents[dateKey].splice(idx,1);
-      if(!calEvents[dateKey].length) delete calEvents[dateKey];
-      break;
-    }
-  }
-  lastCalHash = JSON.stringify(calEvents);
-  render();
-}
-function updateLocalEventTime(uid, oldStart, newStartISO, newEndISO){
-  let found = null;
-  for(const dateKey in calEvents){
-    const idx = calEvents[dateKey].findIndex(e=>e.uid===uid && e.start===oldStart);
-    if(idx !== -1){ found = calEvents[dateKey].splice(idx,1)[0]; if(!calEvents[dateKey].length) delete calEvents[dateKey]; break; }
-  }
-  if(!found) return;
-  found.start = newStartISO; found.end = newEndISO;
-  const startD = new Date(newStartISO), endD = new Date(newEndISO);
-  const dateKey = kyivDateFmt.format(startD);
-  const [sh,sm] = kyivTimeFmt.format(startD).split(':').map(Number);
-  const [eh,em] = kyivTimeFmt.format(endD).split(':').map(Number);
-  found.startMin = sh*60+sm; found.endMin = eh*60+em;
-  (calEvents[dateKey] = calEvents[dateKey] || []).push(found);
-  lastCalHash = JSON.stringify(calEvents);
-  render();
-}
-
-async function deleteTaskUI(uid, start, title){
-  if(!confirm(`Видалити "${title}"?`)) return;
-  const r = await apiFetch(`/task/${encodeURIComponent(uid)}?start=${encodeURIComponent(start)}`, { method:'DELETE' });
-  if(!r.ok){ alert('Не вдалося видалити'); return; }
-  removeLocalEvent(uid, start);
-}
-
-async function saveReschedule(uid, oldStart, startLocal, endLocal){
-  const newStart = kyivLocalToISO(startLocal);
-  const newEnd = kyivLocalToISO(endLocal);
-  const r = await apiFetch(`/task/${encodeURIComponent(uid)}`, { method:'PATCH', body: JSON.stringify({ start: oldStart, newStart, newEnd }) });
-  if(!r.ok){ alert('Не вдалося перенести'); return; }
-  updateLocalEventTime(uid, oldStart, newStart, newEnd);
-}
-
-document.getElementById('task-add-submit').onclick = async () => {
-  const titleInput = document.getElementById('task-title');
-  const startInput = document.getElementById('task-start');
-  const endInput = document.getElementById('task-end');
-  const title = titleInput.value.trim();
-  if(!title || !startInput.value || !endInput.value) return;
-  const startISO = kyivLocalToISO(startInput.value);
-  const endISO = kyivLocalToISO(endInput.value);
-  const r = await apiFetch('/task', { method:'POST', body: JSON.stringify({ title, start: startISO, end: endISO }) });
-  if(!r.ok){ alert('Не вдалося додати задачу'); return; }
-  const { iCalUID } = await r.json();
-  insertLocalEvent({ uid: iCalUID, start: startISO, end: endISO, title });
-  titleInput.value = ''; startInput.value = ''; endInput.value = '';
-};
-
-async function loadCalendar(){
-  const { from, to } = loadRange();
-  const r = await apiFetch(`/calendar?from=${from}&to=${to}`);
-  if(!r.ok) return;
-  const data = await r.json();
-  const hash = JSON.stringify(data);
-  if(hash === lastCalHash) return; // server state matches what's already on screen — skip DOM rebuild
-  lastCalHash = hash;
-  calEvents = data;
-  const today = new Date().toISOString().slice(0,10);
-  for(const dateKey in calEvents){
-    if(dateKey < today && !seenPastDefault.has(dateKey)){
-      collapsedDays.add(dateKey);
-      seenPastDefault.add(dateKey);
-    }
-  }
-  render();
-}
-
-function applySlotVisual(entry){
-  const { ev, slotEl, doneBtn, skipBtn } = entry;
-  slotEl.className = 'slot' + (ev.status==='done'?' done':'') + (ev.status==='skipped'?' skipped':'');
-  doneBtn.className = 'ibtn' + (ev.status==='done' ? ' on done' : '');
-  skipBtn.className = 'ibtn' + (ev.status==='skipped' ? ' on skip' : '');
-}
-
-function updateStats(){
-  let total = 0, done = 0;
-  for(const dateKey in calEvents){
-    for(const ev of calEvents[dateKey]){
-      total++;
-      if(ev.status === 'done') done++;
-    }
-  }
-  document.getElementById('stat-text').textContent = `${done} / ${total} виконано`;
-  document.getElementById('stat-pct').textContent = total ? Math.round(done/total*100)+'%' : '0%';
-  document.getElementById('progress-fill').style.width = (total ? done/total*100 : 0)+'%';
-}
-
-function showSlotError(slotEl){
-  let err = slotEl.querySelector('.slot-err');
-  if(!err){
-    err = document.createElement('div');
-    err.className = 'slot-err';
-    slotEl.appendChild(err);
-  }
-  err.textContent = 'помилка';
-  clearTimeout(err._t);
-  err._t = setTimeout(() => err.remove(), 3000);
-}
-
-async function setStatus(uid, start, newStatus, entry){
-  const { ev } = entry;
-  const prevStatus = ev.status;
-  ev.status = newStatus;
-  applySlotVisual(entry);
-  updateStats();
-  lastCalHash = JSON.stringify(calEvents);
-  try {
-    const r = await apiFetch('/status', { method:'POST', body: JSON.stringify({ uid, start, status: newStatus }) });
-    if(!r.ok) throw new Error('request failed');
-  } catch(e) {
-    ev.status = prevStatus;
-    applySlotVisual(entry);
-    updateStats();
-    lastCalHash = JSON.stringify(calEvents);
-    showSlotError(entry.slotEl);
-  }
-}
-
-function render(){
-  const container = document.getElementById('days');
-  container.innerHTML = '';
-  for(const k in slotIndex) delete slotIndex[k];
-  const today = new Date().toISOString().slice(0,10);
-
-  const dates = Object.keys(calEvents).sort();
-  for(const dateKey of dates){
-    const slots = calEvents[dateKey].slice().sort((a,b)=>a.startMin-b.startMin);
-    const isCollapsed = collapsedDays.has(dateKey);
-    const dayDiv = document.createElement('div');
-    dayDiv.className = 'day' + (isCollapsed ? ' collapsed' : '');
-    dayDiv.dataset.date = dateKey;
-    const title = document.createElement('div');
-    title.className = 'day-title' + (dateKey===today ? ' today' : '');
-    const chevron = document.createElement('span');
-    chevron.className = 'chevron';
-    chevron.textContent = '▾';
-    const titleText = document.createElement('span');
-    titleText.textContent = fmtDay(new Date(dateKey+'T00:00:00'));
-    title.append(chevron, titleText);
-    title.onclick = () => {
-      const nowCollapsed = dayDiv.classList.toggle('collapsed');
-      if(nowCollapsed) collapsedDays.add(dateKey); else collapsedDays.delete(dateKey);
-    };
-    dayDiv.appendChild(title);
-
-    const dayBody = document.createElement('div');
-    dayBody.className = 'day-body';
-    dayDiv.appendChild(dayBody);
-
-    slots.forEach(ev => {
-      const slotEl = document.createElement('div');
-      const timeEl = document.createElement('div'); timeEl.className='time';
-      timeEl.textContent = fmtTime(ev.start) + '–' + fmtTime(ev.end);
-      const labelEl = document.createElement('div'); labelEl.className='label';
-      const titleSpan = document.createElement('div'); titleSpan.textContent = ev.title;
-      const descTrimmed = (ev.description || '').trim();
-      const isJustALink = /^\S+$/.test(descTrimmed) && /^https?:\/\//i.test(descTrimmed);
-      if(descTrimmed && !isJustALink){
-        const descIcon = document.createElement('span');
-        descIcon.className = 'desc-icon';
-        descIcon.textContent = '📝';
-        descIcon.title = ev.description;
-        titleSpan.appendChild(descIcon);
-      }
-      const markersSpan = document.createElement('div'); markersSpan.className = 'markers';
-      markersSpan.textContent = (ev.markers && ev.markers.length) ? ev.markers.join(' · ') : '';
-      labelEl.append(titleSpan, markersSpan);
-      const openInCalendar = () => {
-        const win = window.open('', '_blank');
-        apiFetch(`/event-link?uid=${encodeURIComponent(ev.uid)}&start=${encodeURIComponent(ev.start)}`)
-          .then(r => r.ok ? r.json() : Promise.reject())
-          .then(data => { win.location = data.url || gcalDayUrl(ev.start); })
-          .catch(() => { win.location = gcalDayUrl(ev.start); });
-      };
-      timeEl.onclick = openInCalendar;
-      labelEl.onclick = openInCalendar;
-      const btnRow = document.createElement('div'); btnRow.className='btn-row';
-
-      const doneBtn = document.createElement('button');
-      doneBtn.textContent = '✓';
-
-      const skipBtn = document.createElement('button');
-      skipBtn.textContent = '✕';
-
-      const pomoBtn = document.createElement('button');
-      pomoBtn.className = 'ibtn';
-      pomoBtn.textContent = '⏱';
-      pomoBtn.onclick = () => startPomodoro(ev.uid);
-
-      const rescheduleBtn = document.createElement('button');
-      rescheduleBtn.className = 'ibtn';
-      rescheduleBtn.textContent = '🕓';
-
-      const deleteBtn = document.createElement('button');
-      deleteBtn.className = 'ibtn';
-      deleteBtn.textContent = '🗑';
-
-      const markerBtn = document.createElement('button');
-      markerBtn.className = 'ibtn';
-      markerBtn.textContent = '🏷';
-
-      btnRow.append(doneBtn, skipBtn, pomoBtn, rescheduleBtn, markerBtn, deleteBtn);
-      slotEl.append(timeEl, labelEl, btnRow);
-      dayBody.appendChild(slotEl);
-
-      const panel = document.createElement('div');
-      panel.className = 'reschedule-panel';
-      const startInput = document.createElement('input'); startInput.type = 'datetime-local';
-      startInput.value = isoToKyivLocal(ev.start);
-      const endInput = document.createElement('input'); endInput.type = 'datetime-local';
-      endInput.value = isoToKyivLocal(ev.end);
-      const saveBtn = document.createElement('button'); saveBtn.className = 'save'; saveBtn.textContent = 'Зберегти';
-      const cancelBtn = document.createElement('button'); cancelBtn.className = 'cancel'; cancelBtn.textContent = 'Скасувати';
-      panel.append(startInput, endInput, saveBtn, cancelBtn);
-      dayBody.appendChild(panel);
-
-      rescheduleBtn.onclick = () => panel.classList.toggle('open');
-      cancelBtn.onclick = () => panel.classList.remove('open');
-      saveBtn.onclick = () => saveReschedule(ev.uid, ev.start, startInput.value, endInput.value);
-      deleteBtn.onclick = () => deleteTaskUI(ev.uid, ev.start, ev.title);
-
-      const markersPanel = document.createElement('div');
-      markersPanel.className = 'markers-panel';
-      const tagInput = document.createElement('input'); tagInput.type = 'text'; tagInput.placeholder = 'новий тег';
-      const addTagBtn = document.createElement('button'); addTagBtn.textContent = '+';
-      function renderChips(){
-        markersPanel.querySelectorAll('.chip').forEach(c => c.remove());
-        (ev.markers || []).forEach(tag => {
-          const chip = document.createElement('span'); chip.className = 'chip';
-          const txt = document.createElement('span'); txt.textContent = tag;
-          const x = document.createElement('span'); x.className = 'x'; x.textContent = '×';
-          x.onclick = () => saveMarkers((ev.markers || []).filter(t => t !== tag));
-          chip.append(txt, x);
-          markersPanel.insertBefore(chip, tagInput);
-        });
-      }
-      async function saveMarkers(newMarkers){
-        const r = await apiFetch('/markers', { method:'POST', body: JSON.stringify({ uid: ev.uid, start: ev.start, markers: newMarkers }) });
-        if(!r.ok){ alert('Не вдалося зберегти теги'); return; }
-        ev.markers = newMarkers;
-        markersSpan.textContent = newMarkers.length ? newMarkers.join(' · ') : '';
-        lastCalHash = JSON.stringify(calEvents);
-        renderChips();
-      }
-      addTagBtn.onclick = () => {
-        const v = tagInput.value.trim();
-        if(!v) return;
-        saveMarkers([...(ev.markers || []), v]);
-        tagInput.value = '';
-      };
-      tagInput.addEventListener('keydown', e => { if(e.key === 'Enter') addTagBtn.click(); });
-      markersPanel.append(tagInput, addTagBtn);
-      renderChips();
-      markerBtn.onclick = () => markersPanel.classList.toggle('open');
-      dayBody.appendChild(markersPanel);
-
-      const entry = { ev, slotEl, doneBtn, skipBtn };
-      slotIndex[slotKey(ev.uid, ev.start)] = entry;
-      applySlotVisual(entry);
-      doneBtn.onclick = () => setStatus(ev.uid, ev.start, ev.status==='done' ? 'pending' : 'done', entry);
-      skipBtn.onclick = () => setStatus(ev.uid, ev.start, ev.status==='skipped' ? 'pending' : 'skipped', entry);
-    });
-    container.appendChild(dayDiv);
-  }
-
-  updateStats();
-}
-
-function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-
-function findEventByUid(uid){
-  for(const dateKey in calEvents){
-    const ev = calEvents[dateKey].find(e=>e.uid===uid);
-    if(ev) return ev;
-  }
-  return null;
-}
-
-async function loadCounter(){
-  const { from, to } = loadRange();
-  const r = await apiFetch(`/counter?from=${from}&to=${to}`);
-  const data = await r.json();
-  const liveBody = document.querySelector('#live-table tbody');
-  liveBody.innerHTML = data.live.map(row => `<tr><td>${row.status}</td><td>${row.n}</td></tr>`).join('') || '<tr><td colspan=2>—</td></tr>';
-  const legacyBody = document.querySelector('#legacy-table tbody');
-  legacyBody.innerHTML = data.legacy.map(row => `<tr><td>${row.status}</td><td>${row.n}</td></tr>`).join('') || '<tr><td colspan=2>—</td></tr>';
-
-  const fr = await apiFetch(`/pomodoro/focus-summary?from=${from}&to=${to}`);
-  const focusRows = await fr.json();
-  const focusBody = document.querySelector('#focus-table tbody');
-  focusBody.innerHTML = focusRows.map(row => {
-    const ev = findEventByUid(row.eventId);
-    const title = escapeHtml(ev ? ev.title : row.eventId);
-    return `<tr><td>${title}</td><td>${Math.round(row.totalSec/60)}</td><td>${row.sessions}</td></tr>`;
-  }).join('') || '<tr><td colspan=3>—</td></tr>';
-}
-
 document.querySelectorAll('.tab').forEach(tab => {
   tab.onclick = () => {
-    document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     tab.classList.add('active');
-    const target = tab.dataset.tab; // 'days' | 'counter' | 'about'
-    document.getElementById('days').style.display = target === 'days' ? '' : 'none';
-    document.querySelector('.progress-wrap').style.display = target === 'days' ? '' : 'none';
-    document.querySelector('.task-form').style.display = target === 'days' ? '' : 'none';
-    document.getElementById('counter').style.display = target === 'counter' ? '' : 'none';
-    document.getElementById('about').style.display = target === 'about' ? '' : 'none';
-    if(target === 'counter') loadCounter();
+    ['history','projects','about'].forEach(id => {
+      document.getElementById(id).style.display = (id === tab.dataset.tab) ? '' : 'none';
+    });
   };
 });
 
-document.getElementById('from-date').onchange = e => { const r=loadRange(); r.from=e.target.value; saveRange(r); loadCalendar(); };
-document.getElementById('to-date').onchange = e => { const r=loadRange(); r.to=e.target.value; saveRange(r); loadCalendar(); };
-document.getElementById('today-btn').onclick = () => {
-  const today = new Date().toISOString().slice(0,10);
-  const dayEl = document.querySelector('.day[data-date="' + today + '"]');
-  if(dayEl) dayEl.scrollIntoView({behavior:'smooth', block:'start'});
-};
+function fmtDay(d){
+  const dt = new Date(d.day + 'T00:00:00');
+  const weekday = new Intl.DateTimeFormat('uk-UA', { weekday: 'short' }).format(dt);
+  return `${d.day} (${weekday})`;
+}
 
-// ---- pomodoro ----
-let pomoActive = { active:false };
-let phaseEndsAt = null; // wall-clock ms epoch — avoids drift vs a locally-decremented counter
-let pomoTickId = null;
-const PUSH_ASKED_KEY = 'st_push_asked';
+async function loadHistory(){
+  const stats = await (await apiFetch('/stats')).json();
+  document.getElementById('coverage-text').textContent = `capture: ${stats.coverage} з ${stats.coverageOf}`;
+  document.getElementById('coverage-pct').textContent = Math.round(100*stats.coverage/stats.coverageOf) + '%';
+  document.getElementById('coverage-fill').style.width = Math.round(100*stats.coverage/stats.coverageOf) + '%';
+  document.getElementById('avg-energy').textContent = stats.avgEnergy != null ? stats.avgEnergy : '—';
 
-function updatePomoDisplay(){
-  const startBtn = document.getElementById('pomo-start');
-  const pauseBtn = document.getElementById('pomo-pause');
-  const resumeBtn = document.getElementById('pomo-resume');
-  const skipBtn = document.getElementById('pomo-skip');
-  const stopBtn = document.getElementById('pomo-stop');
-  const phaseEl = document.getElementById('pomo-phase');
-  const taskEl = document.getElementById('pomo-task');
+  const captures = await (await apiFetch('/captures?days=30')).json();
+  const list = document.getElementById('days-list');
+  if(!captures.length){ list.innerHTML = '<p class="empty">Ще нема жодного capture.</p>'; return; }
+  list.innerHTML = captures.map(c => `
+    <div class="day">
+      <div class="day-head">
+        <span class="day-date">${fmtDay(c)}</span>
+        ${c.energy != null ? `<span class="day-energy">⚡ ${c.energy}</span>` : ''}
+      </div>
+      ${c.projects.length ? `<div class="day-projects">${c.projects.map(p => `<span class="chip">${(p.emoji||'')} ${p.name}</span>`).join('')}</div>` : '<div class="empty">нічого не торкнув</div>'}
+      ${c.tomorrow ? `<div class="day-tomorrow">→ завтра: ${c.tomorrow}</div>` : ''}
+      ${c.note ? `<div class="day-note">${c.note}</div>` : ''}
+      ${c.transcript ? `<div class="day-note">🎙 ${c.transcript}</div>` : (c.voice_path ? '<div class="day-note">🎙 (без транскрипту)</div>' : '')}
+    </div>
+  `).join('');
+}
 
-  if(!pomoActive || !pomoActive.active){
-    document.getElementById('pomo-time').textContent = '25:00';
-    phaseEl.textContent = '';
-    taskEl.textContent = '';
-    startBtn.style.display = '';
-    pauseBtn.style.display = 'none';
-    resumeBtn.style.display = 'none';
-    skipBtn.style.display = 'none';
-    stopBtn.style.display = 'none';
-    return;
+const STATUS_LABELS = { active: 'Active', parked: 'Parked', dead: 'Dead' };
+const MODE_LABELS = { hands: '🔌 Руки', head: '💻 Голова', ears: '🎧 Вуха' };
+
+async function loadProjects(){
+  const projects = await (await apiFetch('/projects')).json();
+  const el = document.getElementById('projects-list');
+  const byStatus = { active: [], parked: [], dead: [] };
+  projects.forEach(p => (byStatus[p.status] = byStatus[p.status] || []).push(p));
+
+  el.innerHTML = ['active','parked','dead'].map(status => {
+    const rows = byStatus[status] || [];
+    if(!rows.length) return '';
+    return `
+      <div class="proj-group">
+        <div class="proj-group-title">${STATUS_LABELS[status]} (${rows.length})</div>
+        ${rows.map(p => `
+          <div class="proj-row">
+            <span class="status-${status}">${(p.emoji||'')} ${p.name}</span>
+            <span class="proj-meta">${MODE_LABELS[p.mode]||p.mode}${p.last_touch ? ' · ' + p.last_touch.slice(0,10) : ' · ще не торкав'}</span>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  }).join('') || '<p class="empty">Нема проєктів.</p>';
+}
+
+function init(){
+  apiFetch('/dashboard-open', { method: 'POST' }).catch(()=>{});
+  loadHistory();
+  loadProjects();
+}
+
+(function tryAutoLogin(){
+  if(sessionStorage.getItem(PASS_KEY)){
+    tryPasscode(sessionStorage.getItem(PASS_KEY)).then(ok => {
+      if(ok){
+        document.getElementById('gate').style.display = 'none';
+        document.getElementById('app').style.display = '';
+        init();
+      }
+    });
   }
-
-  const remaining = pomoActive.paused
-    ? pomoActive.remainingSec
-    : Math.max(0, Math.round((phaseEndsAt - Date.now())/1000));
-  const m = Math.floor(remaining/60).toString().padStart(2,'0');
-  const s = (remaining%60).toString().padStart(2,'0');
-  document.getElementById('pomo-time').textContent = `${m}:${s}`;
-  phaseEl.textContent = pomoActive.phaseLabel + (pomoActive.phase==='work' ? ` (${pomoActive.cycleCount}/4)` : '');
-  const taskEv = pomoActive.eventId ? findEventByUid(pomoActive.eventId) : null;
-  taskEl.textContent = taskEv ? taskEv.title : (pomoActive.eventId ? '' : 'Загальний фокус');
-
-  startBtn.style.display = 'none';
-  pauseBtn.style.display = pomoActive.paused ? 'none' : '';
-  resumeBtn.style.display = pomoActive.paused ? '' : 'none';
-  skipBtn.style.display = '';
-  stopBtn.style.display = '';
-}
-
-function scheduleTick(){
-  clearInterval(pomoTickId);
-  pomoTickId = setInterval(() => {
-    updatePomoDisplay();
-    if(pomoActive.active && !pomoActive.paused && Date.now() >= phaseEndsAt){
-      refreshPomoState(); // server already advanced phase + sent push; pull the new state
-    }
-  }, 1000);
-}
-
-async function refreshPomoState(){
-  const r = await apiFetch('/pomodoro/active');
-  pomoActive = await r.json();
-  if(pomoActive.active && !pomoActive.paused) phaseEndsAt = Date.now() + pomoActive.remainingSec*1000;
-  updatePomoDisplay();
-}
-
-function urlBase64ToUint8Array(base64String){
-  const padding = '='.repeat((4 - base64String.length % 4) % 4);
-  const base64 = (base64String + padding).replace(/-/g,'+').replace(/_/g,'/');
-  const raw = atob(base64);
-  return Uint8Array.from([...raw].map(c=>c.charCodeAt(0)));
-}
-
-async function maybeRequestPushPermission(){
-  if(sessionStorage.getItem(PUSH_ASKED_KEY)) return;
-  sessionStorage.setItem(PUSH_ASKED_KEY, '1');
-  if(!('serviceWorker' in navigator) || !('PushManager' in window)) return;
-  try{
-    const perm = await Notification.requestPermission();
-    if(perm !== 'granted') return;
-    const reg = await navigator.serviceWorker.register('sw.js');
-    const r = await apiFetch('/push/vapid-public-key');
-    const { key } = await r.json();
-    if(!key) return;
-    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(key) });
-    await apiFetch('/push/subscribe', { method:'POST', body: JSON.stringify({ subscription: sub.toJSON() }) });
-  }catch(e){ /* denied or unsupported — pomodoro still works locally without push */ }
-}
-
-async function startPomodoro(uid){
-  if(pomoActive.active) return;
-  maybeRequestPushPermission();
-  const r = await apiFetch('/pomodoro/start', { method:'POST', body: JSON.stringify({ uid: uid||null }) });
-  pomoActive = await r.json();
-  if(pomoActive.active) phaseEndsAt = Date.now() + pomoActive.remainingSec*1000;
-  updatePomoDisplay();
-  scheduleTick();
-}
-async function stopPomodoro(){
-  await apiFetch('/pomodoro/stop', { method:'POST', body: JSON.stringify({ completed:false }) });
-  pomoActive = { active:false };
-  updatePomoDisplay();
-}
-async function pausePomodoro(){
-  const r = await apiFetch('/pomodoro/pause', { method:'POST' });
-  pomoActive = await r.json();
-  updatePomoDisplay();
-}
-async function resumePomodoro(){
-  const r = await apiFetch('/pomodoro/resume', { method:'POST' });
-  pomoActive = await r.json();
-  if(pomoActive.active) phaseEndsAt = Date.now() + pomoActive.remainingSec*1000;
-  updatePomoDisplay();
-}
-async function skipPomodoro(){
-  const r = await apiFetch('/pomodoro/skip', { method:'POST' });
-  pomoActive = await r.json();
-  if(pomoActive.active) phaseEndsAt = Date.now() + pomoActive.remainingSec*1000;
-  updatePomoDisplay();
-}
-
-document.getElementById('pomo-start').onclick = () => startPomodoro(null);
-document.getElementById('pomo-stop').onclick = () => stopPomodoro();
-document.getElementById('pomo-pause').onclick = () => pausePomodoro();
-document.getElementById('pomo-resume').onclick = () => resumePomodoro();
-document.getElementById('pomo-skip').onclick = () => skipPomodoro();
-
-async function init(){
-  const { from, to } = loadRange();
-  document.getElementById('from-date').value = from;
-  document.getElementById('to-date').value = to;
-  await loadCalendar();
-  await refreshPomoState(); // restores an in-progress cycle across page reloads / service restarts
-  scheduleTick();
-  setInterval(loadCalendar, 30000);
-}
+})();
 </script>
 </body>
 </html>

@@ -97,6 +97,17 @@ function getCapture(day) {
   return { ...row, projects: JSON.parse(row.projects_json || '[]') };
 }
 
+function listCapturesRecent(days = 30) {
+  const since = kyivToday(-days);
+  const rows = db.prepare('SELECT * FROM captures WHERE day >= ? ORDER BY day DESC').all(since);
+  const projectsById = {};
+  for (const p of db.prepare('SELECT id, name, emoji FROM projects').all()) projectsById[p.id] = p;
+  return rows.map(r => ({
+    ...r,
+    projects: JSON.parse(r.projects_json || '[]').map(id => projectsById[id] || { id, name: '(deleted project)' }),
+  }));
+}
+
 function stats() {
   const since = kyivToday(-30);
   const rows = db.prepare('SELECT day, projects_json, energy FROM captures WHERE day >= ? ORDER BY day').all(since);
@@ -158,7 +169,7 @@ function parkStaleProjects() {
 module.exports = {
   MODES, PROJECT_STATUSES,
   listProjects, createProject, patchProject, projectsMenu, touchProjects,
-  upsertCapture, getCapture, stats, getDay,
+  upsertCapture, getCapture, listCapturesRecent, stats, getDay,
   recordDashboardOpen,
   pickParkedForReview, recordParkedReview,
   parkStaleProjects,

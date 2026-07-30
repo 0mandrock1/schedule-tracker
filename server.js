@@ -260,6 +260,11 @@ app.get('/schedule-tracker-api/stats', (req, res) => {
   res.json(store.stats());
 });
 
+app.get('/schedule-tracker-api/captures', (req, res) => {
+  const days = Number(req.query.days) || 30;
+  res.json(store.listCapturesRecent(days));
+});
+
 app.get('/schedule-tracker-api/day', (req, res) => {
   try {
     res.json(store.getDay(req.query.mode));
