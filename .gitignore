@@ -4,3 +4,7 @@ config/
 *.db-*
 legacy-import.json
 .env
+PROMPT.md
+REPORT.md
+RUN.log
+watchdog.sh
