@@ -61,23 +61,33 @@ function projectsMenu(mode) {
 
 // ---- captures ----
 
-function upsertCapture({ day, projects = [], energy = null, note = null, tomorrow = null, voice_path = null, transcript = null, source = 'api' }) {
+// Partial-update aware: a field absent from `fields` keeps whatever the row already has
+// (falls back to null for a brand-new day). This lets the bot post the main flow in one
+// call, then later post just `{day, note}` or `{day, voice_path, transcript}` for the
+// optional post-flow voice/text add-on without clobbering topics/energy/tomorrow.
+function upsertCapture(fields) {
+  const { day } = fields;
   if (!day) throw new Error('day required (YYYY-MM-DD)');
-  const projectsJson = JSON.stringify(projects || []);
+  const existing = db.prepare('SELECT * FROM captures WHERE day = ?').get(day);
+  const pick = (key) => (key in fields ? fields[key] : existing ? existing[key] : null);
+
+  const projects = 'projects' in fields ? (fields.projects || []) : (existing ? JSON.parse(existing.projects_json || '[]') : []);
+  const projectsJson = JSON.stringify(projects);
+  const energy = pick('energy');
+  const note = pick('note');
+  const tomorrow = pick('tomorrow');
+  const voice_path = pick('voice_path');
+  const transcript = pick('transcript');
+  const source = fields.source || (existing ? existing.source : 'api');
+
   db.prepare(`
     INSERT INTO captures (day, projects_json, energy, note, tomorrow, voice_path, transcript, closed_at, source)
     VALUES (@day, @projectsJson, @energy, @note, @tomorrow, @voice_path, @transcript, datetime('now'), @source)
     ON CONFLICT(day) DO UPDATE SET
-      projects_json = excluded.projects_json,
-      energy = excluded.energy,
-      note = COALESCE(excluded.note, captures.note),
-      tomorrow = excluded.tomorrow,
-      voice_path = COALESCE(excluded.voice_path, captures.voice_path),
-      transcript = COALESCE(excluded.transcript, captures.transcript),
-      closed_at = datetime('now'),
-      source = excluded.source
+      projects_json = @projectsJson, energy = @energy, note = @note, tomorrow = @tomorrow,
+      voice_path = @voice_path, transcript = @transcript, closed_at = datetime('now'), source = @source
   `).run({ day, projectsJson, energy, note, tomorrow, voice_path, transcript, source });
-  touchProjects(projects, day);
+  if ('projects' in fields) touchProjects(projects, day);
   return getCapture(day);
 }
 
