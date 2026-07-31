@@ -16,10 +16,33 @@ LOCK="$LOG_DIR/day-items-craft-$DAY.lock"
 RUNLOG="$LOG_DIR/day-items-craft-$DAY.log"
 
 # Serialize concurrent runs against the same day's doc (generate + evening
-# reconciliation can fire close together); each call still needs to run, so
-# wait for the lock rather than skipping like prep-day-run.sh does.
+# reconciliation + slot taps can fire close together).
+#
+# Раніше тут був простий `flock -w 30`, і це був баг: сам прогін триває ~45-60 с
+# (це повний `claude -p`), тобто таймаут очікування був КОРОТШИЙ за роботу, на яку
+# він чекає. Два синки поспіль -> третій гарантовано падав з "lock timeout" і бот
+# писав «у Craft не поїхало», хоча насправді все синхронізувалось.
+#
+# Тепер схема "один бігає + один чекає":
+#   WAITLOCK — слот черги. Хто його не взяв, той третій-зайвий і виходить 0:
+#              той, хто вже стоїть у черзі, все одно прочитає найсвіжіший стан,
+#              коли до нього дійде. Це sync-to-current-state, а не черга подій.
+#   LOCK     — власне робочий лок, чекаємо на нього щедро (5 хв).
+WAITLOCK="$LOG_DIR/day-items-craft-$DAY.wait"
+
+exec 8>"$WAITLOCK"
+if ! flock -n 8; then
+  echo "[day-items-to-craft] $(date -Is) already queued for $DAY, skipping (не помилка)" >> "$RUNLOG"
+  echo "OK"
+  exit 0
+fi
+
 exec 9>"$LOCK"
-flock -w 30 9 || { echo "FAILED: lock timeout for $DAY" | tee -a "$FAILLOG"; exit 1; }
+if ! flock -w 300 9; then
+  echo "FAILED: lock timeout 300s for $DAY" | tee -a "$FAILLOG"
+  exit 1
+fi
+flock -u 8   # звільняємо слот черги — з цього моменту наступний може ставати в неї
 
 echo "[day-items-to-craft] day=$DAY starting $(date -Is)" >> "$RUNLOG"
 
