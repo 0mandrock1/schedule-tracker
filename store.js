@@ -131,11 +131,19 @@ function stats() {
     completionRate: decided ? Math.round((taken / decided) * 1000) / 10 : null,
   };
 
+  const spiceRows = db.prepare('SELECT connector, vote FROM spice_votes').all();
+  const spiceVotes = {};
+  for (const r of spiceRows) {
+    if (!spiceVotes[r.connector]) spiceVotes[r.connector] = { up: 0, down: 0 };
+    spiceVotes[r.connector][r.vote] = (spiceVotes[r.connector][r.vote] || 0) + 1;
+  }
+
   return {
     coverage, coverageOf: 30,
     avgEnergy: energyN ? Math.round((energySum / energyN) * 10) / 10 : null,
     touchesByProject,
     obligations,
+    spiceVotes,
   };
 }
 
@@ -191,6 +199,14 @@ function getDay(mode) {
   return { obligation, topics: top.slice(0, 2) };
 }
 
+// ---- spice votes ----
+// One row per click on a "для смаку" 👍/👎 link in the prep-day Craft doc.
+// `vote` is 'up'|'down', enforced at the route, not here (link-driven, no client to trust).
+
+function recordSpiceVote(day, connector, vote) {
+  db.prepare('INSERT INTO spice_votes (day, connector, vote) VALUES (?, ?, ?)').run(day, connector, vote);
+}
+
 // ---- dashboard opens ----
 
 function recordDashboardOpen(ua) {
@@ -227,6 +243,7 @@ module.exports = {
   upsertCapture, getCapture, listCapturesRecent, stats, getDay,
   getObligation, setObligationToday, decideObligationToday,
   recordDashboardOpen,
+  recordSpiceVote,
   pickParkedForReview, recordParkedReview,
   parkStaleProjects,
   kyivToday,

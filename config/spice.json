@@ -1,0 +1,44 @@
+[
+  {
+    "day": "mon",
+    "connector": "arxiv",
+    "enabled": true,
+    "prompt": "Одна свіжа стаття (агенти / RAG / audio-ML) з arXiv (cs.AI/cs.LG/eess.AS через http://export.arxiv.org/api/query), 3 речення суті своїми словами, лінк. Без формул."
+  },
+  {
+    "day": "tue",
+    "connector": "splice",
+    "enabled": false,
+    "prompt": "Семпл-пак під настрій альбому (Splice MCP)."
+  },
+  {
+    "day": "wed",
+    "connector": "oreilly",
+    "enabled": false,
+    "prompt": "Один розділ з O'Reilly — бекенд/AI-інфра (O'Reilly MCP)."
+  },
+  {
+    "day": "thu",
+    "connector": "replicate",
+    "enabled": true,
+    "prompt": "Одна модель на спробувати з публічного Replicate API (https://api.replicate.com/v1/models, без ключа; якщо 401 — replicate.com/explore), ухил у візуал/аудіо (корм для lumen-engine і sonargale), один рядок «що з нею зробити»."
+  },
+  {
+    "day": "fri",
+    "connector": "openscad-kiri",
+    "enabled": false,
+    "prompt": "Параметрична дрібниця на ~20 рядків OpenSCAD під друк (kiri-slicer)."
+  },
+  {
+    "day": "sat",
+    "connector": "elicit",
+    "enabled": false,
+    "prompt": "Відповідь на питання, яке Марк ставив цього тижня (Elicit MCP)."
+  },
+  {
+    "day": "sun",
+    "connector": "whimsical",
+    "enabled": true,
+    "prompt": "Авто-діаграма тижня з /schedule-tracker-api/captures та /stats — що реально чіпалось (touches) проти того, що числилось active (Whimsical MCP). Якщо MCP недоступний — ASCII-таблиця того ж розрізу текстом у документі. Блок рефлексії, щотижня."
+  }
+]

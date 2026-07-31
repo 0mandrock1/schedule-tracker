@@ -99,6 +99,14 @@ CREATE TABLE IF NOT EXISTS obligations (
   decided_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS spice_votes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  day DATE NOT NULL,
+  connector TEXT NOT NULL,
+  vote TEXT NOT NULL,
+  voted_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `);
 
 // Seed the project map once — the old Craft "Меню дня — ротація тем" doc is retired in

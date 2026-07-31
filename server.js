@@ -90,9 +90,11 @@ function checkLoginRateLimit(ip) {
 }
 
 function requireAuth(req, res, next) {
-  // machine path: bot uses a static bearer token, not the login form
+  // machine path: bot uses a static bearer token; click-through links (e.g. the
+  // spice-vote 👍/👎 links in the prep-day Craft doc) pass the same token as a
+  // query param since a browser click can't set custom headers.
   const bearer = req.get('authorization');
-  const supplied = req.get('x-api-token') || (bearer && bearer.startsWith('Bearer ') ? bearer.slice(7) : null);
+  const supplied = req.get('x-api-token') || (bearer && bearer.startsWith('Bearer ') ? bearer.slice(7) : null) || req.query.token;
   if (SCHEDULE_API_TOKEN && supplied && timingSafeEqualStr(supplied, SCHEDULE_API_TOKEN)) {
     return next();
   }
@@ -313,6 +315,17 @@ app.post('/schedule-tracker-api/parked-reviews', (req, res) => {
   }
   store.recordParkedReview(project_id, answer);
   res.json({ ok: true });
+});
+
+// Clicked from a 👍/👎 link in the prep-day Craft doc's "для смаку" block —
+// GET (not POST) because it has to work as a plain hyperlink. Auth via ?token=.
+app.get('/schedule-tracker-api/spice-vote', (req, res) => {
+  const { day, connector, vote } = req.query;
+  if (!day || !connector || !['up', 'down'].includes(vote)) {
+    return res.status(400).send('day, connector, vote(up|down) required');
+  }
+  store.recordSpiceVote(day, connector, vote);
+  res.type('html').send(`<!doctype html><meta charset="utf-8"><body style="font:16px sans-serif;padding:2rem">Дякую, голос (${vote === 'up' ? '👍' : '👎'}) за ${connector} зараховано.</body>`);
 });
 
 app.get('/schedule-tracker-api/meetings', async (req, res) => {

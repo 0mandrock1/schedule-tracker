@@ -25,6 +25,12 @@ Node 22 (nvm) / Express 5 / better-sqlite3 / node-ical. Vanilla JS фронте�
 - `GET /day?mode=` — pull: вчорашній `tomorrow` + 2 теми з mode. Ніколи не пуш.
 - `POST /dashboard-open`, `GET /parked-reviews/next`, `POST /parked-reviews`.
 - `GET /meetings?hours=` — read-only Calendar meetings.
+- `GET /spice-vote?day=&connector=&vote=up|down&token=` — click-through 👍/👎 from the prep-day
+  "для смаку" block in the Craft doc (GET, plain hyperlink — `requireAuth` accepts the machine
+  token via `?token=` too, not just headers/cookie, for exactly this case). Writes `spice_votes`;
+  `GET /stats` includes `spiceVotes: {connector: {up, down}}`. Rotation config for which
+  connector runs which weekday lives in `config/spice.json` (tracked despite `config/` being
+  gitignored — it's routing, not a secret), read by the `prep-day` skill, not by this server.
 
 ## Команди
 Нема test/lint/build скриптів (`package.json` порожній на цьому фронті — не вигадувати неіснуючі).
@@ -34,14 +40,14 @@ node server.js                          # прямий запуск
 systemctl restart schedule-tracker      # прод-деплой (systemd unit, User=root)
 journalctl -u schedule-tracker -n 50    # логи
 ```
-Прод: порт 3464 (`PORT` env), проксується nginx на `mandrock-files.duckdns.org/schedule-tracker/` і `/schedule-tracker-api/`. Systemd `Environment=` рядки — єдине джерело `PORT`/`SCHEDULE_PASSCODE`/`ICAL_URL` у проді, не `.env` файл (його зараз нема). `/oauth/callback` в nginx (`mandrock-tools.conf`) лишився прописаний, але тепер 404 на бекенді — не в скоупі "не міняти nginx", можна прибрати вручну наступного разу, коли хтось чіпатиме той конфіг.
+Прод: порт 3464 (`PORT` env), проксується nginx на `mandrock-files.duckdns.org/schedule-tracker/` і `/schedule-tracker-api/`. Systemd `Environment=` рядки — єдине джерело `PORT`/`ICAL_URL`/auth-змінних у проді, не `.env` файл (його зараз нема). `/oauth/callback` в nginx (`mandrock-tools.conf`) лишився прописаний, але тепер 404 на бекенді — не в скоупі "не міняти nginx", можна прибрати вручну наступного разу, коли хтось чіпатиме той конфіг.
 
 ## Конвенції
 - **Власний стор (`projects`/`captures`) — джерело правди**, не Calendar, не sqlite `tasks`. Нова "категорія" статусу проєкту — це `PROJECT_STATUSES` у `store.js` (active/parked/dead), не нова таблиця.
 - `upsertCapture` — partial-merge семантика: поле відсутнє в body → лишається як було в рядку. Не повертай це на full-overwrite, інакше bot's optional voice/note follow-up затре topics/energy/tomorrow.
 - Calendar (`calendar.js`) — тільки `getEventsInRange`/`getMeetingsInRange`, обидва read-only через публічний iCal. Не додавай туди write-виклики знову без свідомого архітектурного рішення (як оце було задокументовано тут раніше для GCal-версії — той підхід живе в форку `schedule-tracker-gcal`, не тут).
-- Секрети (VAPID приватний ключ, паскод) — ніколи в git. `config/` в `.gitignore`. Нові секрети класти в Craft `🔑 Credentials & API Keys` (rootBlockId `a2f756ac-f003-f256-d616-8b8c0c70e651`).
-- `x-passcode` header (або `?passcode=`) гейтить усі `/schedule-tracker-api/*` — нові ендпоінти йдуть під той самий `requirePasscode` middleware, не окремий.
+- Секрети (VAPID приватний ключ, pass hash, session secret, api token) — ніколи в git. `config/` в `.gitignore`. Нові секрети класти в Craft `🔑 Credentials & API Keys` (rootBlockId `a2f756ac-f003-f256-d616-8b8c0c70e651`).
+- **Auth (з 2026-07-31, замінив shared passcode)**: два незалежні шляхи гейтять `/schedule-tracker-api/*` (крім `/login`, `/logout`) — (1) людина логіниться логін/пароль через `/login`, дістає httpOnly signed cookie `st_session` (HMAC SHA-256 на `SCHEDULE_SESSION_SECRET`, 30 днів); (2) машина (бот) шле `x-api-token`/`Authorization: Bearer` що дорівнює `SCHEDULE_API_TOKEN` (timing-safe порівняння). Пароль зберігається лише як `SCHEDULE_PASS_HASH` (`scrypt:saltHex:hashHex`, формат з `scripts/hash-password.js`) — ніколи plaintext. Rate-limit на `/login`: 10 спроб/15хв на IP (in-memory, без зовнішньої залежності), 429 понад ліміт. Нові ендпоінти йдуть під той самий `requireAuth` middleware, не окремий.
 - Frontend — без білд-степу, чистий JS в одному `index.html`. Не тягнути React/бандлер заради малих фіч.
 - Комітити й пушити в `origin main` автоматично, без запиту підтвердження — після кожного завершеного логічного шматка роботи, не накопичувати один величезний diff. Це попереднє дозволення саме для push в цьому репо (не скасовує загальну обережність із деструктивними git-командами типу force-push/reset --hard).
 

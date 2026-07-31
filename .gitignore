@@ -1,5 +1,6 @@
 node_modules/
-config/
+config/*
+!config/spice.json
 *.db
 *.db-*
 legacy-import.json
