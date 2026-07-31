@@ -58,8 +58,15 @@ Sync today's day_items checklist into the prep-day Craft doc for $DAY. No chat o
 PROMPT_EOF
 )
 
-OUTPUT="$(cd "$DIR" && claude -p "$PROMPT" --model sonnet --permission-mode acceptEdits < /dev/null 2>>"$RUNLOG")"
-STATUS=$?
+ATTEMPT=1
+while :; do
+  OUTPUT="$(cd "$DIR" && claude -p "$PROMPT" --model sonnet < /dev/null 2>>"$RUNLOG")"
+  STATUS=$?
+  if [ "$STATUS" -eq 0 ] && ! echo "$OUTPUT" | grep -qiE '529|overloaded|rate limit|usage limit'; then break; fi
+  if [ "$ATTEMPT" -ge 3 ]; then break; fi
+  echo "[day-items-to-craft] attempt $ATTEMPT failed (status=$STATUS), retrying in 60s" >> "$RUNLOG"
+  ATTEMPT=$((ATTEMPT+1)); sleep 60
+done
 echo "$OUTPUT" >> "$RUNLOG"
 echo "[day-items-to-craft] exit=$STATUS $(date -Is)" >> "$RUNLOG"
 
