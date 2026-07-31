@@ -269,6 +269,10 @@ app.get('/schedule-tracker-api/stats', (req, res) => {
   res.json(store.stats());
 });
 
+app.get('/schedule-tracker-api/stats/energy-by-project', (req, res) => {
+  res.json(store.energyByProject());
+});
+
 app.get('/schedule-tracker-api/captures', (req, res) => {
   const days = Number(req.query.days) || 30;
   res.json(store.listCapturesRecent(days));

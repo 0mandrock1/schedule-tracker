@@ -150,6 +150,30 @@ function stats() {
   };
 }
 
+// Average capture energy per project (last 30 days), min 3 observations so a
+// single high/low-energy day doesn't skew a project's read. Sorted best-first.
+function energyByProject() {
+  const since = kyivToday(-30);
+  const rows = db.prepare('SELECT projects_json, energy FROM captures WHERE day >= ? AND energy IS NOT NULL').all(since);
+  const sums = {};
+  for (const r of rows) {
+    for (const pid of JSON.parse(r.projects_json || '[]')) {
+      if (!sums[pid]) sums[pid] = { sum: 0, n: 0 };
+      sums[pid].sum += r.energy;
+      sums[pid].n += 1;
+    }
+  }
+  const projects = db.prepare("SELECT id, name, emoji, mode, status FROM projects WHERE status IN ('active', 'parked')").all();
+  return projects
+    .map((p) => {
+      const s = sums[p.id];
+      if (!s || s.n < 3) return null;
+      return { ...p, avgEnergy: Math.round((s.sum / s.n) * 10) / 10, observations: s.n };
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.avgEnergy - a.avgEnergy);
+}
+
 // baseline is deliberately excluded — it's background, not a completion signal.
 function dayItemsStats() {
   const since = kyivToday(-30);
@@ -261,10 +285,23 @@ function recordParkedReview(project_id, answer) {
 // walked through in the evening reconciliation. `baseline` items are excluded
 // from completion metrics on purpose — see stats() below.
 
-const DAY_ITEM_KINDS = ['baseline', 'habit', 'theme', 'obligation'];
+const DAY_ITEM_KINDS = ['baseline', 'habit', 'theme', 'obligation', 'hook'];
 const DAY_ITEM_SLOTS = ['morning', 'day', 'evening', 'night'];
 const DAY_ITEM_DONE = ['yes', 'no', 'partial'];
 const THEME_VERB = 'Приділити трохи часу:';
+// A project untouched this long (but not yet parked) gets a 5-minute "hook"
+// item instead of a full theme item — lowers the bar back in rather than
+// implying a real session is owed.
+const HOOK_STALE_DAYS = 10;
+const HOOK_TEMPLATES = [
+  (name) => `Відкрити ${name} і нічого більше.`,
+  (name) => `Дістати ${name} з коробки.`,
+];
+
+function hookPhrase(name) {
+  const template = HOOK_TEMPLATES[Math.floor(Math.random() * HOOK_TEMPLATES.length)];
+  return template(name);
+}
 
 function readJsonConfig(file, fallback) {
   try {
@@ -328,8 +365,14 @@ function generateDayItems(day, mode) {
 
   if (mode && MODES.includes(mode)) {
     const { top } = projectsMenu(mode);
+    const now = Date.now();
     for (const project of top.slice(0, 3)) {
-      rows.push({ title: `${THEME_VERB} ${project.name}`, kind: 'theme', source: `project:${project.id}` });
+      const staleDays = project.last_touch ? (now - new Date(project.last_touch).getTime()) / 86400000 : Infinity;
+      if (staleDays > HOOK_STALE_DAYS) {
+        rows.push({ title: hookPhrase(project.name), kind: 'hook', source: `project:${project.id}` });
+      } else {
+        rows.push({ title: `${THEME_VERB} ${project.name}`, kind: 'theme', source: `project:${project.id}` });
+      }
     }
   }
 
@@ -391,7 +434,7 @@ module.exports = {
   MODES, PROJECT_STATUSES, OBLIGATION_OUTCOMES,
   DAY_ITEM_KINDS, DAY_ITEM_SLOTS, DAY_ITEM_DONE,
   listProjects, createProject, patchProject, projectsMenu, touchProjects,
-  upsertCapture, getCapture, listCapturesRecent, stats, getDay,
+  upsertCapture, getCapture, listCapturesRecent, stats, energyByProject, getDay,
   getObligation, setObligationToday, decideObligationToday,
   recordDashboardOpen,
   recordSpiceVote,
