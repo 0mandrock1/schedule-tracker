@@ -10,7 +10,7 @@ const store = require('./store');
 const PORT = process.env.PORT || 3463;
 
 // ---- auth: human login (signed session cookie) + machine token (bot) ----
-// Replaces the old single shared SCHEDULE_PASSCODE gate.
+// Replaced the old single shared-passcode gate (removed 2026-07-31, env var no longer read).
 const SCHEDULE_USER = process.env.SCHEDULE_USER || '';
 const SCHEDULE_PASS_HASH = process.env.SCHEDULE_PASS_HASH || ''; // format: scrypt:saltHex:hashHex
 const SCHEDULE_API_TOKEN = process.env.SCHEDULE_API_TOKEN || '';

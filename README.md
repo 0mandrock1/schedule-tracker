@@ -1,23 +1,30 @@
 # schedule-tracker
 
-A task tracker where **Google Calendar is the database**. Each calendar event is a task; its
-completion state lives directly on the event itself (title prefix + color), not in a separate
-store. Inspired by the approach in
-[jameskokoska/GooglyCalendar](https://github.com/jameskokoska/GooglyCalendar) — state encoded in
-the event, no separate DB for state — reimplemented from scratch with a self-hosted Node backend,
-a passcode gate instead of Google OAuth as the user-auth model, and a small SQLite side-store for
-history/Pomodoro logging only.
+A personal theme/project tracker with its own store. **Rewritten 2026-07-31**: Google Calendar is
+no longer the database. The source of truth is a local SQLite store (`projects` + `captures`);
+Calendar is read-only and only used to surface *real meetings*.
+
+The previous Calendar-as-database version (status encoded on the event via `✅ `/`❌ ` title prefix
+and `colorId`) is frozen as a separate sellable product in `/root/projects/schedule-tracker-gcal/`
+(tag `gcal-v1` in this repo). Nothing in this repo writes to Google Calendar any more.
 
 ## How it works
 
-- **Reads** the calendar via its public iCal feed (`node-ical`), cached 60s. Fast, no API quota
-  cost.
-- **Writes** (marking a task done/skipped, or setting markers) go through the Google Calendar API
-  directly, patching the specific event instance:
-  - `✅ ` / `❌ ` title prefix + `colorId` (green/red) encode status.
-  - `extendedProperties.private.markers` holds arbitrary user tags.
-- A local SQLite file (`tracker.db`) is **not** the source of truth for task state — it only
-  caches a mirror for fast counting, plus the Pomodoro session log and imported legacy history.
+- One entry per day (`captures`): which projects were touched, energy 1-5, one thing for tomorrow,
+  optional note / voice transcript. Pushed once a day from the `evening-checkin` Telegram bot, not
+  from the calendar.
+- `projects` is the theme registry (status `active` / `parked` / `dead`, cluster, mode
+  `hands` / `head` / `ears`). It replaced the retired Craft doc "Меню дня — ротація тем" and the
+  old day-of-week theme rotation — themes are now picked by the API from real coverage, not by
+  weekday.
+- `day_items` is the day checklist (obligation + baseline + habits + theme/hook picks), driven by
+  the bot and mirrored into the daily Craft doc.
+- **Calendar is read-only.** `calendar.js` fetches the public iCal feed (`node-ical`, 60s cache)
+  and exposes exactly two things: `getEventsInRange` and `getMeetingsInRange`. A "real meeting" is
+  an event with attendees or an explicit `[meet]` tag in the title; everything else in the
+  calendar is leftover noise from the retired minute-by-minute era and is ignored.
+- No Google OAuth, no `config/token.json`, no `/oauth/callback`. The public iCal feed is enough
+  for read-only access. (Removed 2026-07-31 together with `auth.js` / `setup-auth.js`.)
 
 ## Setup
 
@@ -25,45 +32,25 @@ history/Pomodoro logging only.
 npm install
 ```
 
-### Google OAuth (one-time)
-
-The backend needs a Google Cloud OAuth **Web application** client (Desktop/installed-app clients
-using the `urn:ietf:wg:oauth:2.0:oob` redirect are deprecated by Google) with the Calendar API
-enabled:
-
-1. Google Cloud Console → enable **Google Calendar API**.
-2. OAuth consent screen → External → add yourself as a test user (avoids needing verification for
-   personal use).
-3. Credentials → Create OAuth client ID → **Web application** → add an HTTPS redirect URI you
-   control, e.g. `https://your-domain/oauth/callback`.
-4. Put the client credentials in `config/oauth-client.json`:
-   ```json
-   { "client_id": "...", "client_secret": "..." }
-   ```
-5. Update `REDIRECT_URI` in `auth.js` to match step 3, and add a reverse-proxy route to this
-   server's `/oauth/callback` for that domain.
-6. Run the server, then visit:
-   ```bash
-   node -e "console.log(require('./auth').getAuthUrl())"
-   ```
-   Open the printed URL, approve access — Google redirects to `/oauth/callback`, which exchanges
-   the code and writes `config/token.json` (holds the refresh token; gitignored).
-
 ### iCal feed URL
 
-Set your own calendar's private iCal address in `calendar.js` (`ICAL_URL`) — find it under
-Google Calendar → Settings → your calendar → "Secret address in iCal format".
+Set `ICAL_URL` in the environment — Google Calendar → Settings → your calendar → "Secret address
+in iCal format". The URL embeds a secret token; never commit it.
 
 ### Environment variables
 
 | Var | Purpose |
 |---|---|
-| `PORT` | HTTP port (default 3463) |
+| `PORT` | HTTP port (default 3463; production runs on 3464) |
 | `SCHEDULE_USER` | Login username for the web dashboard. |
 | `SCHEDULE_PASS_HASH` | scrypt hash of the login password, format `scrypt:saltHex:hashHex` — generate with `node scripts/hash-password.js <password>`. Never store the plaintext password. |
 | `SCHEDULE_SESSION_SECRET` | HMAC key signing the session cookie. Random 32+ bytes hex, e.g. `openssl rand -hex 32`. |
-| `SCHEDULE_API_TOKEN` | Bearer token for machine callers (the Telegram bot) — sent as `x-api-token` or `Authorization: Bearer`, bypasses the login form. Random 32+ bytes hex. |
-| `ICAL_URL` | Your calendar's private iCal address (Google Calendar → Settings → your calendar → "Secret address in iCal format"). Required — this URL embeds a secret token, never commit it. |
+| `SCHEDULE_API_TOKEN` | Bearer token for machine callers (the Telegram bot, the prep-day scripts) — sent as `x-api-token` or `Authorization: Bearer`, bypasses the login form. Random 32+ bytes hex. |
+| `ICAL_URL` | Your calendar's private iCal address. Required. |
+| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` | Web Push keys (Pomodoro phase notifications only). Optional. |
+
+There is no shared-passcode variable any more; login/password + machine token replaced it on
+2026-07-31.
 
 ### Running
 
@@ -71,10 +58,8 @@ Google Calendar → Settings → your calendar → "Secret address in iCal forma
 node server.js
 ```
 
-A sample `systemd` unit is the recommended way to keep it running (see below) — plain `pm2`
-fork-mode was found to intermittently exit the process cleanly (exit code 0, no exception) on this
-particular deployment for reasons not fully root-caused; a `setInterval` keep-alive in `server.js`
-works around it either way.
+Production runs under `systemd` (unit `schedule-tracker`), not pm2 — plain pm2 fork-mode was found
+to intermittently exit the process cleanly (exit code 0, no exception) on this deployment.
 
 ```ini
 [Unit]
@@ -83,73 +68,90 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/path/to/schedule-tracker
-ExecStart=/usr/bin/node /path/to/schedule-tracker/server.js
+WorkingDirectory=/root/projects/schedule-tracker
+ExecStart=/usr/bin/node /root/projects/schedule-tracker/server.js
 Restart=always
 RestartSec=5
-Environment="PORT=3463"
+Environment="PORT=3464"
 Environment="SCHEDULE_USER=your-username"
 Environment="SCHEDULE_PASS_HASH=scrypt:...:..."
 Environment="SCHEDULE_SESSION_SECRET=..."
 Environment="SCHEDULE_API_TOKEN=..."
+Environment="ICAL_URL=https://calendar.google.com/calendar/ical/.../basic.ics"
 
 [Install]
 WantedBy=multi-user.target
 ```
 
+## Auth
+
+All `/schedule-tracker-api/*` routes (except `/login`, `/logout`) require either a valid
+`st_session` login cookie (obtained via `POST /login`) or an `x-api-token` /
+`Authorization: Bearer` header matching `SCHEDULE_API_TOKEN` (timing-safe compare). `/login` is
+rate-limited to 10 attempts / 15 min per IP (in-memory), 429 over the limit.
+
 ## API
 
-All `/schedule-tracker-api/*` routes (except `/login`, `/logout`) require either a valid `st_session`
-login cookie (obtained via `POST /login`) or an `x-api-token`/`Authorization: Bearer` header matching
-`SCHEDULE_API_TOKEN`.
+### Store (source of truth)
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/schedule-tracker-api/calendar?from=YYYY-MM-DD&to=YYYY-MM-DD` | Day-grouped events with parsed status/title/markers |
-| POST | `/schedule-tracker-api/status` | `{ uid, start, status }` — status ∈ `pending, done, skipped` |
-| POST | `/schedule-tracker-api/markers` | `{ uid, start, markers: string[] }` — free-form tags, not a status |
-| POST | `/schedule-tracker-api/task` | `{ title, start, end }` → creates a Calendar event, returns `{ id, iCalUID }` |
-| DELETE | `/schedule-tracker-api/task/:uid?start=` | Deletes one occurrence (recurring-safe — resolves the instance, not the master event) |
-| PATCH | `/schedule-tracker-api/task/:uid` | `{ start, newStart, newEnd }` — reschedules one occurrence |
-| GET | `/schedule-tracker-api/counter?from=&to=` | Aggregate done/skipped counts (live + legacy) |
-| GET | `/schedule-tracker-api/legacy-history` | Imported historical records |
-| GET | `/schedule-tracker-api/pomodoro/active` | Current pomodoro state (phase, cycleCount, remainingSec) or `{ active: false }` |
-| POST | `/schedule-tracker-api/pomodoro/start` | `{ uid? }` — starts a real work/short_break/long_break cycle, persisted server-side |
-| POST | `/schedule-tracker-api/pomodoro/stop` | `{ completed: boolean }` |
-| POST | `/schedule-tracker-api/pomodoro/pause` / `/resume` / `/skip` | Pause, resume, or manually advance the active cycle |
-| GET | `/schedule-tracker-api/pomodoro/log` | Last 200 Pomodoro phase sessions |
-| GET | `/schedule-tracker-api/pomodoro/focus-summary?from=&to=` | Per-task focus time, `GROUP BY eventId` on completed work phases |
-| GET | `/schedule-tracker-api/push/vapid-public-key` | Public VAPID key for `pushManager.subscribe` |
-| POST | `/schedule-tracker-api/push/subscribe` | `{ subscription }` — registers a Web Push endpoint for phase-change notifications |
+| GET | `/projects?status=&mode=` | Project registry |
+| POST | `/projects` | `{ name, emoji, cluster, mode }` |
+| PATCH | `/projects/:id` | Partial update (status, cluster, mode, …) |
+| GET | `/projects/menu?mode=` | Bot keyboard payload |
+| POST | `/capture` | Daily capture upsert (projects touched, energy, tomorrow, note, voice) |
+| GET | `/capture?day=` | One day's capture |
+| GET | `/captures?days=` | Recent captures |
+| GET | `/stats` | Coverage, streak, spice votes |
+| GET | `/stats/energy-by-project` | Mean energy per project (>=3 observations / 30 days) |
+| GET | `/day?mode=` | Today's obligation + <=2 topics for that mode — what prep-day reads |
+| POST | `/obligation` | `{ text }` — set today's obligation |
+| POST | `/obligation/decide` | `{ outcome }` ∈ `taken, moved, dropped` |
+| GET | `/parked-reviews/next?n=` | Parked projects due for Sunday review |
+| POST | `/parked-reviews` | `{ project_id, answer }` ∈ `alive, sleeping, dead` |
+| POST | `/dashboard-open` | Dashboard-open ping |
+| GET | `/spice-vote?day=&connector=&vote=&token=` | 👍/👎 link target inside the daily Craft doc |
 
-`GET /oauth/callback` is unauthenticated (needed for the Google redirect) and refuses to run once
-`config/token.json` already exists.
+### Day checklist
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/day-items/generate` | `{ mode? }` — build today's checklist |
+| GET | `/day-items?day=` | Today's items |
+| PATCH | `/day-items/:id` | `{ done, note, slot }` |
+| GET | `/habits-nudge-check` | One-time "time to add a habit" gate (>= 2026-08-07) |
+| POST | `/habits-nudge-sent` | Marks the one-time nudge as fired (persisted in `flags`) |
+
+### Calendar (read-only)
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/meetings?hours=` | Real meetings only (attendees or `[meet]`), never task statuses |
+| POST | `/meeting-ping-claim` | `{ key }` → `{ claimed }` — atomic dedup claim so a bot restart can't double-ping |
+
+### Legacy / side features (untouched by the rewrite)
+
+`/counter`, `/legacy-history`, `/pomodoro/*`, `/push/*`.
 
 ## Frontend
 
-Single-page app at `public/index.html`, served under `/schedule-tracker/`: passcode gate, day list
-view with a date-range picker, done/skip/Pomodoro/reschedule/delete/tag buttons per event, an
-add-task form, a counter tab (live + legacy history + per-task focus time), and an "Про" (about)
-tab explaining the app to a new user. Dark theme, responsive down to mobile widths.
+Single-page app at `public/index.html`, served under `/schedule-tracker/`: login gate, coverage
+("capture: N з 30"), day history (projects, energy, note, transcript), projects by status, the
+parking lot. `POST /dashboard-open` fires on load. No task editing, no minute-by-minute schedule.
 
-Status toggles apply optimistically (flip the UI before the POST resolves, revert + show an inline
-error on failure) instead of waiting on a full recalendar fetch + re-render. Add/delete/reschedule
-do the same — Google's public iCal feed (what `GET /calendar` reads from) lags real-time Calendar
-API writes by more than this app's own 60s cache TTL, so waiting on a refetch to reflect a write
-would show stale data for a while.
+## Scripts
 
-### Web Push (Pomodoro phase-change notifications)
-
-Requires VAPID keys (`npx web-push generate-vapid-keys`) in a gitignored `.env` — see
-`.env.example`. Without them, `push/vapid-public-key` returns `null` and the frontend silently
-skips the push-permission prompt; Pomodoro still works fully without it. `public/sw.js` is the
-service worker; permission is requested on first Pomodoro start, not on page load.
+| Script | What it does |
+|---|---|
+| `scripts/prep-day-run.sh [mode]` | On-demand prep-day generation via `claude -p`. One doc per Kyiv day (marker file), 3× retry on 529/overloaded. Prints the Craft URL. |
+| `scripts/day-items-to-craft.sh [YYYY-MM-DD]` | Mirrors today's `day_items` into the "Заняття на день" section of the daily Craft doc. Idempotent, 3× retry. |
+| `scripts/verify.mjs` | System health check — all endpoints, bot cron registration, script presence + executable bit. `npm run verify`. |
+| `scripts/hash-password.js <password>` | Generates `SCHEDULE_PASS_HASH`. |
 
 ## Legacy data import
 
-If migrating from a prior tracker, drop its exported history as `legacy-import.json` (gitignored —
-it's personal data, not part of this repo) in the shape `{ "<slotKey>": "done"|"skipped", ... }`.
-It's imported into the `legacy_history` table on every boot (idempotent). `migrate-legacy-to-calendar.js`
-is a one-off script that additionally tries to project each historical record back onto the
-matching real Calendar event (by date + closest start time), so old history shows up visually too
-— not every entry can be matched if the original event no longer exists or times drifted.
+`legacy-import.json` (gitignored personal data) in the shape `{ "<slotKey>": "done"|"skipped" }` is
+imported into `legacy_history` on every boot (idempotent). The old `migrate-legacy-to-calendar.js`
+projector was deleted on 2026-07-31 — it wrote back into Google Calendar, which this version does
+not do.
