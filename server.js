@@ -374,6 +374,18 @@ app.post('/schedule-tracker-api/habits-nudge-sent', (req, res) => {
   res.json({ ok: true });
 });
 
+// Flags are one-shot latches (habits nudge, meeting-ping claims). Exposed so the
+// bot's hidden /debughabits can show and reset them without shelling into sqlite.
+app.get('/schedule-tracker-api/flags', (req, res) => {
+  res.json(store.listFlags());
+});
+
+app.post('/schedule-tracker-api/flags/clear', (req, res) => {
+  const { key } = req.body || {};
+  if (!key) return res.status(400).json({ error: 'key required' });
+  res.json(store.clearFlag(key));
+});
+
 app.get('/schedule-tracker-api/meetings', async (req, res) => {
   const hours = Number(req.query.hours) || 24;
   try {

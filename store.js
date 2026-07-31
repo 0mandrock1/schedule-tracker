@@ -415,6 +415,17 @@ function habitsNudgeCheck() {
   return { shouldSend: !sent };
 }
 
+// Debug/verify surface over the `flags` table: lets /debughabits show whether the
+// one-time nudge already fired and reset it, instead of poking sqlite by hand.
+function listFlags() {
+  return db.prepare('SELECT key, fired_at FROM flags ORDER BY fired_at DESC').all();
+}
+
+function clearFlag(key) {
+  const info = db.prepare('DELETE FROM flags WHERE key = ?').run(key);
+  return { cleared: info.changes > 0 };
+}
+
 function markHabitsNudgeSent() {
   db.prepare("INSERT OR REPLACE INTO flags (key, fired_at) VALUES (?, datetime('now'))").run(HABITS_NUDGE_KEY);
 }
@@ -451,7 +462,7 @@ module.exports = {
   pickParkedForReview, recordParkedReview,
   parkStaleProjects,
   generateDayItems, listDayItems, setDayItemSlot, decideDayItem,
-  habitsNudgeCheck, markHabitsNudgeSent,
+  habitsNudgeCheck, markHabitsNudgeSent, listFlags, clearFlag,
   claimMeetingPing,
   kyivToday,
 };
