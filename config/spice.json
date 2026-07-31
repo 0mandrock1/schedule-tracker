@@ -2,43 +2,50 @@
   {
     "day": "mon",
     "connector": "arxiv",
+    "transport": "public-http",
     "enabled": true,
-    "prompt": "Одна свіжа стаття (агенти / RAG / audio-ML) з arXiv (cs.AI/cs.LG/eess.AS через http://export.arxiv.org/api/query), 3 речення суті своїми словами, лінк. Без формул."
+    "prompt": "Одна свіжа стаття (агенти / RAG / audio-ML) з arXiv через https://export.arxiv.org/api/query?search_query=cat:cs.AI+OR+cat:cs.LG+OR+cat:eess.AS&sortBy=submittedDate&sortOrder=descending&max_results=20 — УВАГА: тільки https, http дає 301. Обрати одну дотичну, 3 речення суті своїми словами, лінк. Без формул. Фолбек: та сама тема через web_search."
   },
   {
     "day": "tue",
-    "connector": "splice",
+    "connector": "sound-design",
+    "transport": "self",
     "enabled": true,
-    "prompt": "Один семпл-пак або стек під настрій альбому (Splice MCP), один рядок «навіщо саме він». Фолбек без MCP: напрям звуку текстом — жанр + 3 ключові слова для ручного пошуку в Splice."
+    "prompt": "Один конкретний прийом саунд-дизайну або мікса під настрій альбому: що крутити, в якому порядку, на що слухати. Bitwig-термінами. 4-6 рядків, без загальників на кшталт «додай реверб». Нічого зовнішнього не викликати."
   },
   {
     "day": "wed",
-    "connector": "oreilly",
+    "connector": "hackernews",
+    "transport": "public-http",
     "enabled": true,
-    "prompt": "Один розділ або книга по бекенду / AI-інфрі (O'Reilly). Фолбек без MCP: публічний матеріал того ж профілю — radar.oreilly.com, офіційний блог, developer docs — з лінком і 2 реченнями суті."
+    "prompt": "Одна історія з Hacker News по бекенду / інфрі / AI-інфрі: https://hacker-news.firebaseio.com/v0/topstories.json -> перші ~40 id -> https://hacker-news.firebaseio.com/v0/item/{id}.json, обрати найдотичнішу до стеку Марка (PHP/Laravel/Postgres, self-hosted, агенти). Заголовок, лінк, 2-3 речення чому це варте уваги. Фолбек: web_search по тій самій темі."
   },
   {
     "day": "thu",
-    "connector": "replicate",
+    "connector": "huggingface",
+    "transport": "public-http",
     "enabled": true,
-    "prompt": "Одна модель на спробувати з публічного Replicate API (https://api.replicate.com/v1/models, без ключа; якщо 401 — replicate.com/explore), ухил у візуал/аудіо (корм для lumen-engine і sonargale), один рядок «що з нею зробити»."
+    "prompt": "Одна модель на спробувати з публічного HuggingFace API (ключ не потрібен): https://huggingface.co/api/models?sort=trendingScore&direction=-1&limit=20 — можна звузити через &filter=text-to-audio / text-to-image / text-to-video. Ухил у візуал/аудіо (корм для lumen-engine і sonargale). Назва, лінк huggingface.co/{modelId}, один рядок «що з нею зробити». НЕ використовувати api.replicate.com — він з 31.07.2026 віддає 401 без ключа. Фолбек: парсити https://replicate.com/explore (віддає 200)."
   },
   {
     "day": "fri",
     "connector": "openscad-kiri",
+    "transport": "self",
     "enabled": true,
-    "prompt": "Параметрична дрібниця на ~20 рядків OpenSCAD під друк на Primex 1 (kiri-slicer). Код прямо в документі, не лінк. Один рядок «нащо воно»."
+    "prompt": "Параметрична дрібниця на ~20 рядків OpenSCAD під друк на Primex 1 (320x320x320, PLA). Код прямо в документі, не лінк. Один рядок «нащо воно». Нічого зовнішнього не викликати."
   },
   {
     "day": "sat",
-    "connector": "elicit",
+    "connector": "github-trending",
+    "transport": "gh-cli",
     "enabled": true,
-    "prompt": "Відповідь на питання, яке Марк ставив цього тижня (Elicit MCP). Фолбек: взяти відкрите питання з активних тем дня і відповісти коротко з джерелами через web_search."
+    "prompt": "Один свіжий репозиторій за тиждень через локальний gh CLI (він авторизований на VPS, тому ліміти не б'ють): gh api \"search/repositories?q=created:>{дата-7днів}&sort=stars&order=desc&per_page=20\" --jq '.items[] | \"\\(.full_name) ★\\(.stargazers_count) — \\(.description)\"'. УВАГА: прямий curl на api.github.com з цього VPS віддає 403 (unauthenticated rate limit), тому саме gh, а не curl. Обрати дотичний до тем Марка — агенти, аудіо, embedded, self-hosted. Назва, лінк, 2-3 речення чим цікавий."
   },
   {
     "day": "sun",
-    "connector": "whimsical",
+    "connector": "own-stats",
+    "transport": "own-api",
     "enabled": true,
-    "prompt": "Авто-діаграма тижня з /schedule-tracker-api/stats/energy-by-project — де енергія найвища/найнижча по проєктах (Whimsical MCP). Якщо MCP недоступний — ASCII-таблиця того ж розрізу текстом у документі. Блок рефлексії, щотижня."
+    "prompt": "Тижнева рефлексія на власних даних: GET /schedule-tracker-api/stats/energy-by-project (середня енергія по проєкту, лише з >=3 спостережень за 30 днів) + GET /stats. Вивести ASCII-таблицею прямо в документі: проєкт | середня енергія | скільки разів торкнув. Один абзац висновку — де енергія найвища, де найнижча, що з цим робити. Ніяких зовнішніх сервісів."
   }
 ]

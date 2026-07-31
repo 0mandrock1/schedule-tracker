@@ -215,7 +215,10 @@ function checkScripts() {
     }
   }
 
-  // spice.json must have all seven days and all of them enabled
+  // spice.json must have all seven days, all enabled, and — since the 31.07 rework —
+  // none of them may depend on an MCP connector. MCP auth silently expires; that is
+  // exactly how O'Reilly/Replicate rotted and the block started disappearing.
+  const ALLOWED_TRANSPORTS = ['public-http', 'self', 'own-api', 'gh-cli'];
   try {
     const spice = JSON.parse(fs.readFileSync(path.join(ROOT, 'config/spice.json'), 'utf8'));
     const days = spice.map((x) => x.day);
@@ -224,8 +227,51 @@ function checkScripts() {
     const disabled = spice.filter((x) => !x.enabled).map((x) => x.day);
     record('files', 'spice.json: 7 днів', missing.length === 0, missing.length ? `нема: ${missing.join(', ')}` : '7/7');
     record('files', 'spice.json: усі увімкнені', disabled.length === 0, disabled.length ? `вимкнені: ${disabled.join(', ')}` : 'усі enabled');
+    const badTransport = spice.filter((x) => !ALLOWED_TRANSPORTS.includes(x.transport));
+    record('files', 'spice.json: нема MCP-залежностей', badTransport.length === 0,
+      badTransport.length ? `недозволений transport: ${badTransport.map((x) => `${x.day}=${x.transport}`).join(', ')}` : ALLOWED_TRANSPORTS.join(' / '));
   } catch (err) {
     record('files', 'spice.json', false, err.message);
+  }
+}
+
+// Live reachability of every external source the spice block relies on. These are
+// the exact URLs/commands in spice.json prompts; each was verified by hand on
+// 31.07 and each has a known trap (arXiv redirects on http, api.github.com 403s
+// from this IP, api.replicate.com 401s without a key). A silent break here means
+// the daily block quietly degrades to its fallback, so it gets its own group.
+async function checkSpiceSources() {
+  const probes = [
+    ['arXiv (https, не http)', async () => {
+      const r = await fetch('https://export.arxiv.org/api/query?search_query=cat:cs.AI&max_results=1', { redirect: 'manual' });
+      return { ok: r.status === 200, detail: `HTTP ${r.status}` };
+    }],
+    ['Hacker News topstories', async () => {
+      const r = await fetch('https://hacker-news.firebaseio.com/v0/topstories.json');
+      const ids = r.ok ? await r.json() : [];
+      return { ok: r.ok && Array.isArray(ids) && ids.length > 0, detail: `HTTP ${r.status}, ${ids.length || 0} id` };
+    }],
+    ['HuggingFace trending', async () => {
+      const r = await fetch('https://huggingface.co/api/models?sort=trendingScore&direction=-1&limit=3');
+      const m = r.ok ? await r.json() : [];
+      return { ok: r.ok && Array.isArray(m) && m.length > 0, detail: `HTTP ${r.status}, ${m.length || 0} моделей` };
+    }],
+    ['gh CLI (GitHub search)', async () => {
+      try {
+        const out = execSync('gh api "search/repositories?q=stars:>1000&per_page=1" --jq .total_count', { encoding: 'utf8', timeout: 15000 }).trim();
+        return { ok: /^\d+$/.test(out), detail: `total_count=${out}` };
+      } catch (err) {
+        return { ok: false, detail: `gh впав: ${String(err.message).split('\n')[0]}` };
+      }
+    }],
+  ];
+  for (const [name, fn] of probes) {
+    try {
+      const { ok, detail } = await fn();
+      record('spice', name, ok, detail);
+    } catch (err) {
+      record('spice', name, false, err.message);
+    }
   }
 }
 
@@ -275,7 +321,7 @@ function checkDeadFiles() {
 function printTable() {
   const w1 = Math.max(...results.map((r) => r.name.length), 6);
   const groups = [...new Set(results.map((r) => r.group))];
-  const LABELS = { endpoints: 'ЕНДПОІНТИ', bot: 'БОТ / КРОНИ', files: 'ФАЙЛИ І КОНФІГИ', legacy: 'ЛЕГАСІ ПРИБРАНО' };
+  const LABELS = { endpoints: 'ЕНДПОІНТИ', bot: 'БОТ / КРОНИ', files: 'ФАЙЛИ І КОНФІГИ', spice: 'ДЖЕРЕЛА СПАЙСУ (живі)', legacy: 'ЛЕГАСІ ПРИБРАНО' };
   for (const g of groups) {
     console.log(`\n── ${LABELS[g] || g} ${'─'.repeat(Math.max(0, 60 - (LABELS[g] || g).length))}`);
     for (const r of results.filter((x) => x.group === g)) {
@@ -298,6 +344,7 @@ async function main() {
   await checkEndpoints();
   checkBotCrons();
   checkScripts();
+  await checkSpiceSources();
   checkDeadFiles();
   process.exitCode = printTable() ? 0 : 1;
 }
