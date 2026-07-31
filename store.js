@@ -419,6 +419,16 @@ function markHabitsNudgeSent() {
   db.prepare("INSERT OR REPLACE INTO flags (key, fired_at) VALUES (?, datetime('now'))").run(HABITS_NUDGE_KEY);
 }
 
+// ---- meeting ping dedup (survives bot restart, unlike an in-memory Set) ----
+// Reuses `flags` as a claim table: one row per event-occurrence key means
+// "already pinged". INSERT OR IGNORE makes the claim atomic — changes > 0
+// only for the caller that wins the race.
+
+function claimMeetingPing(key) {
+  const info = db.prepare("INSERT OR IGNORE INTO flags (key, fired_at) VALUES (?, datetime('now'))").run(`meeting_ping:${key}`);
+  return info.changes > 0;
+}
+
 // ---- daily park sweep ----
 
 function parkStaleProjects() {
@@ -442,5 +452,6 @@ module.exports = {
   parkStaleProjects,
   generateDayItems, listDayItems, setDayItemSlot, decideDayItem,
   habitsNudgeCheck, markHabitsNudgeSent,
+  claimMeetingPing,
   kyivToday,
 };

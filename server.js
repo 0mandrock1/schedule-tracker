@@ -384,6 +384,14 @@ app.get('/schedule-tracker-api/meetings', async (req, res) => {
   }
 });
 
+// Atomic claim for meeting-ping dedup — bot calls this before sending a
+// "30 min out" ping so a restart never re-sends (was an in-memory Set).
+app.post('/schedule-tracker-api/meeting-ping-claim', (req, res) => {
+  const { key } = req.body || {};
+  if (!key) return res.status(400).json({ error: 'key required' });
+  res.json({ claimed: store.claimMeetingPing(key) });
+});
+
 app.use('/schedule-tracker', express.static(path.join(__dirname, 'public')));
 
 app.listen(PORT, '127.0.0.1', () => {
