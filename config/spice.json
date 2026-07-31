@@ -8,14 +8,14 @@
   {
     "day": "tue",
     "connector": "splice",
-    "enabled": false,
-    "prompt": "Семпл-пак під настрій альбому (Splice MCP)."
+    "enabled": true,
+    "prompt": "Один семпл-пак або стек під настрій альбому (Splice MCP), один рядок «навіщо саме він». Фолбек без MCP: напрям звуку текстом — жанр + 3 ключові слова для ручного пошуку в Splice."
   },
   {
     "day": "wed",
     "connector": "oreilly",
-    "enabled": false,
-    "prompt": "Один розділ з O'Reilly — бекенд/AI-інфра (O'Reilly MCP)."
+    "enabled": true,
+    "prompt": "Один розділ або книга по бекенду / AI-інфрі (O'Reilly). Фолбек без MCP: публічний матеріал того ж профілю — radar.oreilly.com, офіційний блог, developer docs — з лінком і 2 реченнями суті."
   },
   {
     "day": "thu",
@@ -26,19 +26,19 @@
   {
     "day": "fri",
     "connector": "openscad-kiri",
-    "enabled": false,
-    "prompt": "Параметрична дрібниця на ~20 рядків OpenSCAD під друк (kiri-slicer)."
+    "enabled": true,
+    "prompt": "Параметрична дрібниця на ~20 рядків OpenSCAD під друк на Primex 1 (kiri-slicer). Код прямо в документі, не лінк. Один рядок «нащо воно»."
   },
   {
     "day": "sat",
     "connector": "elicit",
-    "enabled": false,
-    "prompt": "Відповідь на питання, яке Марк ставив цього тижня (Elicit MCP)."
+    "enabled": true,
+    "prompt": "Відповідь на питання, яке Марк ставив цього тижня (Elicit MCP). Фолбек: взяти відкрите питання з активних тем дня і відповісти коротко з джерелами через web_search."
   },
   {
     "day": "sun",
     "connector": "whimsical",
     "enabled": true,
-    "prompt": "Авто-діаграма тижня з /schedule-tracker-api/captures та /stats — що реально чіпалось (touches) проти того, що числилось active (Whimsical MCP). Якщо MCP недоступний — ASCII-таблиця того ж розрізу текстом у документі. Блок рефлексії, щотижня."
+    "prompt": "Авто-діаграма тижня з /schedule-tracker-api/stats/energy-by-project — де енергія найвища/найнижча по проєктах (Whimsical MCP). Якщо MCP недоступний — ASCII-таблиця того ж розрізу текстом у документі. Блок рефлексії, щотижня."
   }
 ]
