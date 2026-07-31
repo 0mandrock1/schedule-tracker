@@ -1,6 +1,8 @@
 // Own store for projects/captures — replaces Google Calendar as the source of truth
 // for task/theme tracking (2026-07-31 rewrite). Calendar is now read-only, meetings-only.
 const { db } = require('./db');
+const fs = require('fs');
+const path = require('path');
 
 const MODES = ['hands', 'head', 'ears'];
 const PROJECT_STATUSES = ['active', 'parked', 'dead'];
@@ -144,7 +146,35 @@ function stats() {
     touchesByProject,
     obligations,
     spiceVotes,
+    dayItems: dayItemsStats(),
   };
+}
+
+// baseline is deliberately excluded — it's background, not a completion signal.
+function dayItemsStats() {
+  const since = kyivToday(-30);
+  const rows = db.prepare("SELECT day, title, kind, done FROM day_items WHERE day >= ? AND kind != 'baseline'").all(since);
+
+  const themeRows = rows.filter(r => r.kind === 'theme');
+  const themeDone = themeRows.filter(r => r.done === 'yes').length;
+  const theme = {
+    total: themeRows.length, done: themeDone,
+    share: themeRows.length ? Math.round((themeDone / themeRows.length) * 1000) / 10 : null,
+  };
+
+  const byTitle = {};
+  for (const r of rows.filter(r => r.kind === 'habit')) (byTitle[r.title] ||= []).push(r);
+  const habits = Object.entries(byTitle).map(([title, items]) => {
+    const sorted = [...items].sort((a, b) => (a.day < b.day ? 1 : -1));
+    let streak = 0;
+    for (const it of sorted) {
+      if (it.done !== 'yes') break;
+      streak++;
+    }
+    return { title, streak, total: items.length };
+  });
+
+  return { theme, habits };
 }
 
 // ---- obligations ----
@@ -226,6 +256,126 @@ function recordParkedReview(project_id, answer) {
   // 'sleeping' (спить далі) leaves status as parked
 }
 
+// ---- day_items ----
+// Generated once per day right after the obligation is set (prep-day), then
+// walked through in the evening reconciliation. `baseline` items are excluded
+// from completion metrics on purpose — see stats() below.
+
+const DAY_ITEM_KINDS = ['baseline', 'habit', 'theme', 'obligation'];
+const DAY_ITEM_SLOTS = ['morning', 'day', 'evening', 'night'];
+const DAY_ITEM_DONE = ['yes', 'no', 'partial'];
+const THEME_VERB = 'Приділити трохи часу:';
+
+function readJsonConfig(file, fallback) {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(__dirname, 'config', file), 'utf8'));
+  } catch (err) {
+    return fallback;
+  }
+}
+
+function loadBaseline() {
+  const rows = readJsonConfig('baseline.json', []);
+  return Array.isArray(rows) ? rows.filter(t => typeof t === 'string') : [];
+}
+
+function loadHabits() {
+  const rows = readJsonConfig('habits.json', []);
+  return Array.isArray(rows) ? rows.filter(h => h && h.enabled !== false && h.title) : [];
+}
+
+// ISO weekday: Monday=1 .. Sunday=7, matching `active_days` in habits.json.
+function isoWeekday(day) {
+  const dow = new Date(`${day}T12:00:00Z`).getUTCDay();
+  return dow === 0 ? 7 : dow;
+}
+
+function activeHabitsForDay(day) {
+  const weekday = isoWeekday(day);
+  return loadHabits().filter(h => {
+    if (h.active_from && day < h.active_from) return false;
+    if (Array.isArray(h.active_days) && h.active_days.length && !h.active_days.includes(weekday)) return false;
+    return true;
+  });
+}
+
+function listDayItems(day) {
+  return db.prepare('SELECT * FROM day_items WHERE day = ? ORDER BY id ASC').all(day);
+}
+
+// Idempotent: if items already exist for `day`, returns them unchanged rather
+// than duplicating (the "Виставити на день" button/prep-day step may fire more
+// than once for the same day).
+function generateDayItems(day, mode) {
+  const existing = listDayItems(day);
+  if (existing.length) return existing;
+
+  const insert = db.prepare('INSERT INTO day_items (day, title, kind, source) VALUES (?, ?, ?, ?)');
+  const rows = [];
+
+  const obligation = getObligation(day) || ensureObligationForToday();
+  if (obligation && obligation.day === day) {
+    rows.push({ title: obligation.text, kind: 'obligation', source: `obligation:${obligation.id}` });
+  }
+
+  for (const title of loadBaseline()) {
+    rows.push({ title, kind: 'baseline', source: 'baseline' });
+  }
+
+  for (const habit of activeHabitsForDay(day)) {
+    rows.push({ title: habit.title, kind: 'habit', source: `habit:${habit.title}` });
+  }
+
+  if (mode && MODES.includes(mode)) {
+    const { top } = projectsMenu(mode);
+    for (const project of top.slice(0, 3)) {
+      rows.push({ title: `${THEME_VERB} ${project.name}`, kind: 'theme', source: `project:${project.id}` });
+    }
+  }
+
+  const tx = db.transaction((list) => {
+    for (const r of list) insert.run(day, r.title, r.kind, r.source);
+  });
+  tx(rows);
+  return listDayItems(day);
+}
+
+function setDayItemSlot(id, slot) {
+  if (!DAY_ITEM_SLOTS.includes(slot)) throw new Error('slot must be morning|day|evening|night');
+  const info = db.prepare('UPDATE day_items SET slot = ? WHERE id = ?').run(slot, id);
+  if (!info.changes) throw new Error('day item not found');
+  return db.prepare('SELECT * FROM day_items WHERE id = ?').get(id);
+}
+
+function decideDayItem(id, done, note) {
+  if (!DAY_ITEM_DONE.includes(done)) throw new Error('done must be yes|no|partial');
+  const info = db.prepare(`
+    UPDATE day_items SET done = ?, note = COALESCE(?, note), decided_at = datetime('now') WHERE id = ?
+  `).run(done, note ?? null, id);
+  if (!info.changes) throw new Error('day item not found');
+  return db.prepare('SELECT * FROM day_items WHERE id = ?').get(id);
+}
+
+// ---- habits nudge (one-time) ----
+// Fires once, no earlier than 2026-08-07 (Kyiv), only while habits.json is
+// still empty — a nudge to seed the first habit. The bot cron polls this and
+// calls markHabitsNudgeSent() after it actually sends the message.
+
+const HABITS_NUDGE_KEY = 'habits_nudge_sent';
+const HABITS_NUDGE_NOT_BEFORE = '2026-08-07';
+
+function habitsNudgeCheck() {
+  const today = kyivToday();
+  if (today < HABITS_NUDGE_NOT_BEFORE) return { shouldSend: false };
+  if (loadHabits().length > 0) return { shouldSend: false };
+  const sent = db.prepare('SELECT 1 FROM flags WHERE key = ?').get(HABITS_NUDGE_KEY);
+  return { shouldSend: !sent };
+}
+
+function markHabitsNudgeSent() {
+  db.prepare("INSERT OR REPLACE INTO flags (key, fired_at) VALUES (?, datetime('now'))").run(HABITS_NUDGE_KEY);
+}
+
 // ---- daily park sweep ----
 
 function parkStaleProjects() {
@@ -239,6 +389,7 @@ function parkStaleProjects() {
 
 module.exports = {
   MODES, PROJECT_STATUSES, OBLIGATION_OUTCOMES,
+  DAY_ITEM_KINDS, DAY_ITEM_SLOTS, DAY_ITEM_DONE,
   listProjects, createProject, patchProject, projectsMenu, touchProjects,
   upsertCapture, getCapture, listCapturesRecent, stats, getDay,
   getObligation, setObligationToday, decideObligationToday,
@@ -246,5 +397,7 @@ module.exports = {
   recordSpiceVote,
   pickParkedForReview, recordParkedReview,
   parkStaleProjects,
+  generateDayItems, listDayItems, setDayItemSlot, decideDayItem,
+  habitsNudgeCheck, markHabitsNudgeSent,
   kyivToday,
 };

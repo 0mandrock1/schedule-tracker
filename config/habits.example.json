@@ -1,0 +1,11 @@
+[
+  {
+    "_comment": "Скопіюй цей об'єкт (без _comment) у habits.json, щоб звичка почала падати в day_items як kind=habit від active_from.",
+    "title": "Розтяжка 10 хв",
+    "slot": "evening",
+    "active_from": "2026-08-10",
+    "active_days": [1, 2, 3, 4, 5, 6, 7],
+    "streak_goal": 21,
+    "enabled": true
+  }
+]

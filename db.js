@@ -107,6 +107,25 @@ CREATE TABLE IF NOT EXISTS spice_votes (
   vote TEXT NOT NULL,
   voted_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS day_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  day DATE NOT NULL,
+  title TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  slot TEXT,
+  source TEXT,
+  done TEXT,
+  note TEXT,
+  decided_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_day_items_day ON day_items(day);
+
+CREATE TABLE IF NOT EXISTS flags (
+  key TEXT PRIMARY KEY,
+  fired_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `);
 
 // Seed the project map once — the old Craft "Меню дня — ротація тем" doc is retired in

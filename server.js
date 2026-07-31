@@ -328,6 +328,48 @@ app.get('/schedule-tracker-api/spice-vote', (req, res) => {
   res.type('html').send(`<!doctype html><meta charset="utf-8"><body style="font:16px sans-serif;padding:2rem">Дякую, голос (${vote === 'up' ? '👍' : '👎'}) за ${connector} зараховано.</body>`);
 });
 
+// "Виставити на день" — generates today's day_items once (idempotent) from the
+// obligation, config/baseline.json, active config/habits.json entries, and
+// 2-3 theme picks for the given mode.
+app.post('/schedule-tracker-api/day-items/generate', (req, res) => {
+  try {
+    const day = store.kyivToday();
+    res.json(store.generateDayItems(day, (req.body || {}).mode));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/schedule-tracker-api/day-items', (req, res) => {
+  const day = req.query.day || store.kyivToday();
+  res.json(store.listDayItems(day));
+});
+
+app.patch('/schedule-tracker-api/day-items/:id', (req, res) => {
+  try {
+    const { slot, done, note } = req.body || {};
+    let item;
+    if (slot !== undefined) item = store.setDayItemSlot(req.params.id, slot);
+    if (done !== undefined) item = store.decideDayItem(req.params.id, done, note);
+    if (!item) return res.status(400).json({ error: 'slot or done required' });
+    res.json(item);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// One-time (no earlier than 2026-08-07 Kyiv, only while habits.json is still
+// empty) — the bot cron polls this and calls the -sent endpoint after it
+// actually delivers the "підселити звичку" nudge.
+app.get('/schedule-tracker-api/habits-nudge-check', (req, res) => {
+  res.json(store.habitsNudgeCheck());
+});
+
+app.post('/schedule-tracker-api/habits-nudge-sent', (req, res) => {
+  store.markHabitsNudgeSent();
+  res.json({ ok: true });
+});
+
 app.get('/schedule-tracker-api/meetings', async (req, res) => {
   const hours = Number(req.query.hours) || 24;
   try {

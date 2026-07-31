@@ -11,7 +11,7 @@ Node 22 (nvm) / Express 5 / better-sqlite3 / node-ical. Vanilla JS фронте�
 - `server.js` — Express-роутинг, `requirePasscode` middleware на всі `/schedule-tracker-api/*`.
 - `store.js` — вся бізнес-логіка проєктів/captures: CRUD проєктів, `projectsMenu`, `upsertCapture` (partial-update aware — bot дописує note/voice окремим викликом, не перезаписуючи topics/energy/tomorrow), `stats`, `getDay` (pull для `/day`), park sweep (active без touch 14+ днів → parked).
 - `calendar.js` — **тільки читання**: iCal-фетч (публічний `ICAL_URL`, кеш 60с) + `getMeetingsInRange` (attendees/`[meet]`-фільтр). Жодних Calendar API write-викликів, жодного OAuth — публічного iCal фіда досить.
-- `db.js` — SQLite (`tracker.db`, gitignored). Нові таблиці: `projects`, `captures`, `parked_reviews`, `dashboard_opens` (джерело правди для тем/трекінгу). Старі `tasks`/`legacy_history`/`pomodoro_*`/`push_subscriptions` лишились не чіпані (historical/pomodoro — не в скоупі переархітектури), `tasks` тепер нічим не наповнюється (Calendar-write endpoints видалені).
+- `db.js` — SQLite (`tracker.db`, gitignored). Нові таблиці: `projects`, `captures`, `parked_reviews`, `dashboard_opens` (джерело правди для тем/трекінгу), `obligations`, `spice_votes`, `day_items`, `flags`. Старі `tasks`/`legacy_history`/`pomodoro_*`/`push_subscriptions` лишились не чіпані (historical/pomodoro — не в скоупі переархітектури), `tasks` тепер нічим не наповнюється (Calendar-write endpoints видалені).
 - `public/index.html` — read-only дашборд: coverage (N/30), історія captures, проєкти по статусах. Без редагування, без pomodoro-UI (pomodoro-бекенд лишився недоторканим, просто не показаний у новому фронті).
 - `pomodoro.js` — не займаний цією переархітектурою, ендпоінти `/pomodoro/*` лишились.
 - `migrate-legacy-to-calendar.js` — одноразовий скрипт з ЕРИ Calendar-write (посилається на видалені `calendar.js`-функції) — **непрацездатний, не запускати**; лишений як історичний артефакт, не чіпати без причини.
@@ -31,6 +31,19 @@ Node 22 (nvm) / Express 5 / better-sqlite3 / node-ical. Vanilla JS фронте�
   `GET /stats` includes `spiceVotes: {connector: {up, down}}`. Rotation config for which
   connector runs which weekday lives in `config/spice.json` (tracked despite `config/` being
   gitignored — it's routing, not a secret), read by the `prep-day` skill, not by this server.
+- `POST /day-items/generate` (body `{mode}`), `GET /day-items?day=`, `PATCH /day-items/:id`
+  (`{slot}` and/or `{done, note}`) — the per-day checklist (`day_items` table: `obligation` +
+  `baseline` from `config/baseline.json` + active `habit`s from `config/habits.json` + 2-3
+  `theme` picks for `mode`). Idempotent per day — calling `generate` twice for the same day
+  returns the existing rows instead of duplicating. `baseline` is excluded from completion
+  metrics (`GET /stats` → `dayItems: {theme: {total, done, share}, habits: [{title, streak,
+  total}]}`) — it's background, not a signal. `slot` is a rough bucket
+  (morning/day/evening/night), never a clock time — reminder scheduling per slot is bot-side,
+  out of scope here.
+- `GET /habits-nudge-check`, `POST /habits-nudge-sent` — one-time flag (`flags` table, key
+  `habits_nudge_sent`) for the "час підселити звичку" nudge: fires no earlier than 2026-08-07
+  Kyiv, only while `config/habits.json` is still `[]`. Bot cron polls `-check`, sends the
+  message, then calls `-sent` so it never repeats.
 
 ## Команди
 Нема test/lint/build скриптів (`package.json` порожній на цьому фронті — не вигадувати неіснуючі).
@@ -51,8 +64,15 @@ journalctl -u schedule-tracker -n 50    # логи
 - Frontend — без білд-степу, чистий JS в одному `index.html`. Не тягнути React/бандлер заради малих фіч.
 - Комітити й пушити в `origin main` автоматично, без запиту підтвердження — після кожного завершеного логічного шматка роботи, не накопичувати один величезний diff. Це попереднє дозволення саме для push в цьому репо (не скасовує загальну обережність із деструктивними git-командами типу force-push/reset --hard).
 
+## Заготовка під звички
+`config/habits.json` — масив `{title, slot, active_from, active_days, streak_goal, enabled}`,
+живий приклад формату в `config/habits.example.json` (не читається кодом, лише документація).
+`active_days` — ISO weekday 1(Пн)-7(Нд); порожній/відсутній масив = щодня. Додати звичку =
+один запис у `habits.json`, без правки коду — з'явиться в `day_items` як `kind=habit` від
+`active_from`. `config/baseline.json` — плоский масив рядків (назва звички), теж без коду.
+
 ## Пов'язані компоненти (поза цим репо)
-- `/root/projects/tg_bots/evening-checkin/` — Telegram-бот, єдиний пуш-канал (00:00 Kyiv capture, 01:30 один репіт, meetings-пінги окремим 15-хв polling). Дивись його власний код — `bot.js`/`api.js`/`transcribe.js`/`dateUtils.js`.
+- `/root/projects/tg_bots/evening-checkin/` — Telegram-бот, єдиний пуш-канал (00:00 Kyiv capture, 01:30 один репіт, meetings-пінги окремим 15-хв polling). Дивись його власний код — `bot.js`/`api.js`/`transcribe.js`/`dateUtils.js`. **Не реалізовано тут** (сесія, що писала `day_items`, була сендбоксована лише на `schedule-tracker/` і не мала доступу до цього репо): кнопки "Виставити на день"/слот/"нагадати" в Craft-доці й у відповіді бота, вечірня звірка по `day_items` (✅/✕/~), нагадування по слотах (09:00/14:00/19:00/23:00 Kyiv, дефолти конфігуруються бот-стороною), і сам polling `GET /habits-nudge-check` о 7 серпня 2026 12:00 Kyiv — усе це чекає на бот-сторону, API вже готове й засмоктестоване.
 - `/root/claude-config/skills/user/prep-day/` — читає `/day` API замість Craft-меню ротації (Phase 5).
 - `/root/projects/schedule-tracker-gcal/` — заморожений sellable форк старої Calendar-backed версії, не чіпати.
 

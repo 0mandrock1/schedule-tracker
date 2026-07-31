@@ -1,6 +1,9 @@
 node_modules/
 config/*
 !config/spice.json
+!config/baseline.json
+!config/habits.json
+!config/habits.example.json
 *.db
 *.db-*
 legacy-import.json
