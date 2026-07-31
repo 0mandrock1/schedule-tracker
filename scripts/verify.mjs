@@ -228,8 +228,16 @@ function checkScripts() {
     record('files', 'spice.json: 7 днів', missing.length === 0, missing.length ? `нема: ${missing.join(', ')}` : '7/7');
     record('files', 'spice.json: усі увімкнені', disabled.length === 0, disabled.length ? `вимкнені: ${disabled.join(', ')}` : 'усі enabled');
     const badTransport = spice.filter((x) => !ALLOWED_TRANSPORTS.includes(x.transport));
-    record('files', 'spice.json: нема MCP-залежностей', badTransport.length === 0,
+    record('files', 'spice.json: base без MCP', badTransport.length === 0,
       badTransport.length ? `недозволений transport: ${badTransport.map((x) => `${x.day}=${x.transport}`).join(', ')}` : ALLOWED_TRANSPORTS.join(' / '));
+    // Бонуси — навпаки, мають бути саме MCP і мають бути в кожного дня. Це не
+    // вимога до роботи (бонус опційний), а перевірка, що конфіг не з'їхав.
+    const withBonus = spice.filter((x) => Array.isArray(x.bonus) && x.bonus.length);
+    const flat = withBonus.flatMap((x) => x.bonus);
+    const badBonus = flat.filter((b) => b.transport !== 'mcp' || !b.connector || !b.prompt);
+    record('files', 'spice.json: bonus-шар', withBonus.length === spice.length && badBonus.length === 0,
+      badBonus.length ? `биті бонуси: ${badBonus.map((b) => b.connector).join(', ')}`
+        : `${flat.length} бонусів на ${withBonus.length}/${spice.length} днів (${flat.filter((b) => b.status === 'authless').length} authless)`);
   } catch (err) {
     record('files', 'spice.json', false, err.message);
   }

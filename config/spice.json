@@ -4,48 +4,122 @@
     "connector": "arxiv",
     "transport": "public-http",
     "enabled": true,
-    "prompt": "Одна свіжа стаття (агенти / RAG / audio-ML) з arXiv через https://export.arxiv.org/api/query?search_query=cat:cs.AI+OR+cat:cs.LG+OR+cat:eess.AS&sortBy=submittedDate&sortOrder=descending&max_results=20 — УВАГА: тільки https, http дає 301. Обрати одну дотичну, 3 речення суті своїми словами, лінк. Без формул. Фолбек: та сама тема через web_search."
+    "prompt": "Одна свіжа стаття (агенти / RAG / audio-ML) з arXiv через https://export.arxiv.org/api/query?search_query=cat:cs.AI+OR+cat:cs.LG+OR+cat:eess.AS&sortBy=submittedDate&sortOrder=descending&max_results=20 — УВАГА: тільки https, http дає 301. Обрати одну дотичну, 3 речення суті своїми словами, лінк. Без формул. Фолбек: та сама тема через web_search.",
+    "bonus": [
+      {
+        "connector": "alphaxiv",
+        "transport": "mcp",
+        "status": "needs-auth",
+        "prompt": "Якщо alphaXiv MCP авторизований — узяти ту саму (або кращу) статтю через нього і додати рядок «що про неї кажуть» (community-обговорення). Це те, чого сирий arXiv API не дає. Недоступний — base вже дав блок, нічого не робити."
+      }
+    ]
   },
   {
     "day": "tue",
     "connector": "sound-design",
     "transport": "self",
     "enabled": true,
-    "prompt": "Один конкретний прийом саунд-дизайну або мікса під настрій альбому: що крутити, в якому порядку, на що слухати. Bitwig-термінами. 4-6 рядків, без загальників на кшталт «додай реверб». Нічого зовнішнього не викликати."
+    "prompt": "Один конкретний прийом саунд-дизайну або мікса під настрій альбому: що крутити, в якому порядку, на що слухати. Bitwig-термінами. 4-6 рядків, без загальників на кшталт «додай реверб». Нічого зовнішнього не викликати.",
+    "bonus": [
+      {
+        "connector": "splice",
+        "transport": "mcp",
+        "status": "connected",
+        "prompt": "Splice MCP: prompt_to_stack під настрій альбому за описом прийому з base-блоку. Дати назву стека, 2-3 ключові семпли і лінк (share_stack). Тобто base каже ЩО крутити, бонус дає ЧИМ. Недоступний — лишається сам прийом."
+      },
+      {
+        "connector": "spotify",
+        "transport": "mcp",
+        "status": "authless",
+        "prompt": "Spotify MCP (authless — авторизація не потрібна, тому практично завжди живий): один референс-трек під настрій альбому, у якому чути саме той прийом, що описаний у base-блоці. Назва, виконавець, лінк, один рядок «слухати ось на це». Можна замість пошуку зібрати короткий плейлист через create_playlist."
+      }
+    ]
   },
   {
     "day": "wed",
     "connector": "hackernews",
     "transport": "public-http",
     "enabled": true,
-    "prompt": "Одна історія з Hacker News по бекенду / інфрі / AI-інфрі: https://hacker-news.firebaseio.com/v0/topstories.json -> перші ~40 id -> https://hacker-news.firebaseio.com/v0/item/{id}.json, обрати найдотичнішу до стеку Марка (PHP/Laravel/Postgres, self-hosted, агенти). Заголовок, лінк, 2-3 речення чому це варте уваги. Фолбек: web_search по тій самій темі."
+    "prompt": "Одна історія з Hacker News по бекенду / інфрі / AI-інфрі: https://hacker-news.firebaseio.com/v0/topstories.json -> перші ~40 id -> https://hacker-news.firebaseio.com/v0/item/{id}.json, обрати найдотичнішу до стеку Марка (PHP/Laravel/Postgres, self-hosted, агенти). Заголовок, лінк, 2-3 речення чому це варте уваги. Фолбек: web_search по тій самій темі.",
+    "bonus": [
+      {
+        "connector": "replit",
+        "transport": "mcp",
+        "status": "needs-auth",
+        "prompt": "Якщо Replit MCP авторизований — зліпити мінімальний запускний приклад по темі з HN-історії (10-30 рядків, один файл) і дати лінк на repl. Читати статтю приємно, запустити — приємніше. Недоступний — лишається сама історія."
+      }
+    ]
   },
   {
     "day": "thu",
     "connector": "huggingface",
     "transport": "public-http",
     "enabled": true,
-    "prompt": "Одна модель на спробувати з публічного HuggingFace API (ключ не потрібен): https://huggingface.co/api/models?sort=trendingScore&direction=-1&limit=20 — можна звузити через &filter=text-to-audio / text-to-image / text-to-video. Ухил у візуал/аудіо (корм для lumen-engine і sonargale). Назва, лінк huggingface.co/{modelId}, один рядок «що з нею зробити». НЕ використовувати api.replicate.com — він з 31.07.2026 віддає 401 без ключа. Фолбек: парсити https://replicate.com/explore (віддає 200)."
+    "prompt": "Одна модель на спробувати з публічного HuggingFace API (ключ не потрібен): https://huggingface.co/api/models?sort=trendingScore&direction=-1&limit=20 — можна звузити через &filter=text-to-audio / text-to-image / text-to-video. Ухил у візуал/аудіо (корм для lumen-engine і sonargale). Назва, лінк huggingface.co/{modelId}, один рядок «що з нею зробити». НЕ використовувати api.replicate.com — він з 31.07.2026 віддає 401 без ключа. Фолбек: парсити https://replicate.com/explore (віддає 200).",
+    "bonus": [
+      {
+        "connector": "replicate",
+        "transport": "mcp",
+        "status": "needs-auth",
+        "prompt": "Якщо Replicate MCP авторизований — знайти ту саму (або близьку) модель у нього і дати ПРЯМЕ посилання на запуск з готовими параметрами під візуал/аудіо. HuggingFace дає листинг, Replicate дає кнопку «запустити». Недоступний — лишається модель з HF."
+      }
+    ]
   },
   {
     "day": "fri",
     "connector": "openscad-kiri",
     "transport": "self",
     "enabled": true,
-    "prompt": "Параметрична дрібниця на ~20 рядків OpenSCAD під друк на Primex 1 (320x320x320, PLA). Код прямо в документі, не лінк. Один рядок «нащо воно». Нічого зовнішнього не викликати."
+    "prompt": "Параметрична дрібниця на ~20 рядків OpenSCAD під друк на Primex 1 (320x320x320, PLA). Код прямо в документі, не лінк. Один рядок «нащо воно». Нічого зовнішнього не викликати.",
+    "bonus": [
+      {
+        "connector": "kiri",
+        "transport": "mcp",
+        "status": "down",
+        "prompt": "Якщо kiri MCP піднятий — прогнати згенерований OpenSCAD через слайсер під Primex 1 і дати час друку + витрату філаменту одним рядком. Зараз kiri віддає Failed to connect, тому це фіча на потім. Недоступний — лишається сам код."
+      }
+    ]
   },
   {
     "day": "sat",
     "connector": "github-trending",
     "transport": "gh-cli",
     "enabled": true,
-    "prompt": "Один свіжий репозиторій за тиждень через локальний gh CLI (він авторизований на VPS, тому ліміти не б'ють): gh api \"search/repositories?q=created:>{дата-7днів}&sort=stars&order=desc&per_page=20\" --jq '.items[] | \"\\(.full_name) ★\\(.stargazers_count) — \\(.description)\"'. УВАГА: прямий curl на api.github.com з цього VPS віддає 403 (unauthenticated rate limit), тому саме gh, а не curl. Обрати дотичний до тем Марка — агенти, аудіо, embedded, self-hosted. Назва, лінк, 2-3 речення чим цікавий."
+    "prompt": "Один свіжий репозиторій за тиждень через локальний gh CLI (він авторизований на VPS, тому ліміти не б'ють): gh api \"search/repositories?q=created:>{дата-7днів}&sort=stars&order=desc&per_page=20\" --jq '.items[] | \"\\(.full_name) ★\\(.stargazers_count) — \\(.description)\"'. УВАГА: прямий curl на api.github.com з цього VPS віддає 403 (unauthenticated rate limit), тому саме gh, а не curl. Обрати дотичний до тем Марка — агенти, аудіо, embedded, self-hosted. Назва, лінк, 2-3 речення чим цікавий.",
+    "bonus": [
+      {
+        "connector": "elicit",
+        "transport": "mcp",
+        "status": "connected",
+        "prompt": "Elicit MCP: взяти відкрите питання з активних тем дня (або те, що Марк ставив цього тижня) і дати відповідь з джерелами, 3-4 речення. Йде ОКРЕМИМ підпунктом під репозиторієм, не замість нього. Недоступний — лишається сам репозиторій."
+      },
+      {
+        "connector": "consensus",
+        "transport": "mcp",
+        "status": "not-installed",
+        "prompt": "Consensus MCP (якщо підключений): альтернатива Elicit — той самий пошук відповіді з наукових джерел, один tool `search`. Використовувати, якщо Elicit мовчить."
+      }
+    ]
   },
   {
     "day": "sun",
     "connector": "own-stats",
     "transport": "own-api",
     "enabled": true,
-    "prompt": "Тижнева рефлексія на власних даних: GET /schedule-tracker-api/stats/energy-by-project (середня енергія по проєкту, лише з >=3 спостережень за 30 днів) + GET /stats. Вивести ASCII-таблицею прямо в документі: проєкт | середня енергія | скільки разів торкнув. Один абзац висновку — де енергія найвища, де найнижча, що з цим робити. Ніяких зовнішніх сервісів."
+    "prompt": "Тижнева рефлексія на власних даних: GET /schedule-tracker-api/stats/energy-by-project (середня енергія по проєкту, лише з >=3 спостережень за 30 днів) + GET /stats. Вивести ASCII-таблицею прямо в документі: проєкт | середня енергія | скільки разів торкнув. Один абзац висновку — де енергія найвища, де найнижча, що з цим робити. Ніяких зовнішніх сервісів.",
+    "bonus": [
+      {
+        "connector": "whimsical",
+        "transport": "mcp",
+        "status": "connected",
+        "prompt": "Whimsical MCP: перетворити ASCII-таблицю енергії з base-блоку на справжню діаграму тижня (flowchart або mindmap: проєкт -> енергія -> висновок) і дати лінк. Недоступний — ASCII-таблиця вже в документі, нічого не робити."
+      },
+      {
+        "connector": "mermaid-chart",
+        "transport": "mcp",
+        "status": "authless",
+        "prompt": "Mermaid Chart MCP (authless): якщо Whimsical не відповів — відрендерити ту саму діаграму тижня як Mermaid і вкласти SVG/лінк. Дешевший і надійніший шлях до картинки, ніж Whimsical, бо не потребує авторизації."
+      }
+    ]
   }
 ]
