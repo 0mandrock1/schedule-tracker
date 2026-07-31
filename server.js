@@ -1,25 +1,138 @@
 require('dotenv').config({ path: require('path').join(__dirname, '.env'), quiet: true });
 const express = require('express');
 const path = require('path');
+const crypto = require('crypto');
 const { db, importLegacy } = require('./db');
 const { getMeetingsInRange } = require('./calendar');
 const pomodoro = require('./pomodoro');
 const store = require('./store');
 
 const PORT = process.env.PORT || 3463;
-const PASSCODE = process.env.SCHEDULE_PASSCODE || '';
+
+// ---- auth: human login (signed session cookie) + machine token (bot) ----
+// Replaces the old single shared SCHEDULE_PASSCODE gate.
+const SCHEDULE_USER = process.env.SCHEDULE_USER || '';
+const SCHEDULE_PASS_HASH = process.env.SCHEDULE_PASS_HASH || ''; // format: scrypt:saltHex:hashHex
+const SCHEDULE_API_TOKEN = process.env.SCHEDULE_API_TOKEN || '';
+const SESSION_SECRET = process.env.SCHEDULE_SESSION_SECRET || '';
+
+const SESSION_COOKIE = 'st_session';
+const SESSION_MAX_AGE_MS = 30 * 24 * 3600 * 1000;
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_MAX_ATTEMPTS = 10;
 
 const app = express();
+app.set('trust proxy', 'loopback'); // nginx on the same host sets X-Forwarded-For
 app.use(express.json());
 
-function requirePasscode(req, res, next) {
-  if (!PASSCODE) return next();
-  const supplied = req.get('x-passcode') || req.query.passcode;
-  if (supplied === PASSCODE) return next();
-  res.status(401).json({ error: 'passcode required' });
+function parseCookies(req) {
+  const header = req.headers.cookie;
+  const out = {};
+  if (!header) return out;
+  header.split(';').forEach(pair => {
+    const idx = pair.indexOf('=');
+    if (idx === -1) return;
+    out[pair.slice(0, idx).trim()] = decodeURIComponent(pair.slice(idx + 1).trim());
+  });
+  return out;
 }
 
-app.use('/schedule-tracker-api', requirePasscode);
+function timingSafeEqualStr(a, b) {
+  const aBuf = Buffer.from(a || '');
+  const bBuf = Buffer.from(b || '');
+  if (aBuf.length !== bBuf.length) return false;
+  return crypto.timingSafeEqual(aBuf, bBuf);
+}
+
+function signSession(payload) {
+  const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const sig = crypto.createHmac('sha256', SESSION_SECRET).update(body).digest('base64url');
+  return `${body}.${sig}`;
+}
+
+function verifySession(token) {
+  if (!token || !SESSION_SECRET) return null;
+  const dot = token.indexOf('.');
+  if (dot === -1) return null;
+  const body = token.slice(0, dot);
+  const sig = token.slice(dot + 1);
+  const expected = crypto.createHmac('sha256', SESSION_SECRET).update(body).digest('base64url');
+  if (!timingSafeEqualStr(sig, expected)) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
+    if (!payload.exp || Date.now() > payload.exp) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+function verifyPasswordHash(password, stored) {
+  const parts = (stored || '').split(':');
+  if (parts.length !== 3 || parts[0] !== 'scrypt') return false;
+  const salt = Buffer.from(parts[1], 'hex');
+  const expected = Buffer.from(parts[2], 'hex');
+  const derived = crypto.scryptSync(password || '', salt, expected.length);
+  return derived.length === expected.length && crypto.timingSafeEqual(derived, expected);
+}
+
+// ip -> { count, resetAt }
+const loginAttempts = new Map();
+function checkLoginRateLimit(ip) {
+  const now = Date.now();
+  const entry = loginAttempts.get(ip);
+  if (!entry || now > entry.resetAt) {
+    loginAttempts.set(ip, { count: 1, resetAt: now + LOGIN_WINDOW_MS });
+    return true;
+  }
+  entry.count += 1;
+  return entry.count <= LOGIN_MAX_ATTEMPTS;
+}
+
+function requireAuth(req, res, next) {
+  // machine path: bot uses a static bearer token, not the login form
+  const bearer = req.get('authorization');
+  const supplied = req.get('x-api-token') || (bearer && bearer.startsWith('Bearer ') ? bearer.slice(7) : null);
+  if (SCHEDULE_API_TOKEN && supplied && timingSafeEqualStr(supplied, SCHEDULE_API_TOKEN)) {
+    return next();
+  }
+  // human path: signed session cookie set by /login
+  const session = verifySession(parseCookies(req)[SESSION_COOKIE]);
+  if (session && SCHEDULE_USER && session.u === SCHEDULE_USER) return next();
+
+  res.status(401).json({ error: 'authentication required' });
+}
+
+app.post('/schedule-tracker-api/login', (req, res) => {
+  if (!checkLoginRateLimit(req.ip)) {
+    return res.status(429).json({ error: 'too many attempts, try again later' });
+  }
+  if (!SCHEDULE_USER || !SCHEDULE_PASS_HASH || !SESSION_SECRET) {
+    return res.status(500).json({ error: 'auth not configured' });
+  }
+  const { username, password } = req.body || {};
+  const userOk = timingSafeEqualStr(username || '', SCHEDULE_USER);
+  const passOk = verifyPasswordHash(password || '', SCHEDULE_PASS_HASH);
+  if (!userOk || !passOk) {
+    return res.status(401).json({ error: 'invalid credentials' });
+  }
+  const token = signSession({ u: SCHEDULE_USER, exp: Date.now() + SESSION_MAX_AGE_MS });
+  res.cookie(SESSION_COOKIE, token, {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'lax',
+    maxAge: SESSION_MAX_AGE_MS,
+    path: '/',
+  });
+  res.json({ ok: true });
+});
+
+app.post('/schedule-tracker-api/logout', (req, res) => {
+  res.clearCookie(SESSION_COOKIE, { path: '/' });
+  res.json({ ok: true });
+});
+
+app.use('/schedule-tracker-api', requireAuth);
 
 app.get('/schedule-tracker-api/counter', (req, res) => {
   const { from, to } = req.query;
@@ -162,6 +275,22 @@ app.get('/schedule-tracker-api/captures', (req, res) => {
 app.get('/schedule-tracker-api/day', (req, res) => {
   try {
     res.json(store.getDay(req.query.mode));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/schedule-tracker-api/obligation', (req, res) => {
+  try {
+    res.json(store.setObligationToday((req.body || {}).text));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/schedule-tracker-api/obligation/decide', (req, res) => {
+  try {
+    res.json(store.decideObligationToday((req.body || {}).outcome));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

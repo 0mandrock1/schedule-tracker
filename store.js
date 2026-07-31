@@ -120,18 +120,73 @@ function stats() {
   }
   const projects = db.prepare('SELECT id, name, emoji, mode, status FROM projects').all();
   const touchesByProject = projects.map(p => ({ ...p, touches: touches[p.id] || 0 }));
+
+  const oblRows = db.prepare('SELECT outcome FROM obligations WHERE day >= ?').all(since);
+  const taken = oblRows.filter(r => r.outcome === 'taken').length;
+  const moved = oblRows.filter(r => r.outcome === 'moved').length;
+  const dropped = oblRows.filter(r => r.outcome === 'dropped').length;
+  const decided = taken + moved + dropped;
+  const obligations = {
+    total: oblRows.length, taken, moved, dropped, decided,
+    completionRate: decided ? Math.round((taken / decided) * 1000) / 10 : null,
+  };
+
   return {
     coverage, coverageOf: 30,
     avgEnergy: energyN ? Math.round((energySum / energyN) * 10) / 10 : null,
     touchesByProject,
+    obligations,
   };
+}
+
+// ---- obligations ----
+// One row per day: either auto-carried from yesterday's capture `tomorrow`
+// (source_day set) or picked manually in /day (source_day null). `outcome`
+// stays null until the owner resolves it (taken/moved/dropped).
+
+const OBLIGATION_OUTCOMES = ['taken', 'moved', 'dropped'];
+
+function getObligation(day) {
+  return db.prepare('SELECT * FROM obligations WHERE day = ?').get(day);
+}
+
+// Auto-creates today's obligation from yesterday's capture.tomorrow the first
+// time anyone asks for it. Never overwrites an existing row (manual pick wins).
+function ensureObligationForToday() {
+  const today = kyivToday();
+  const existing = getObligation(today);
+  if (existing) return existing;
+  const yesterday = kyivToday(-1);
+  const prevCapture = getCapture(yesterday);
+  if (!prevCapture || !prevCapture.tomorrow) return null;
+  db.prepare('INSERT INTO obligations (day, text, source_day) VALUES (?, ?, ?)').run(today, prevCapture.tomorrow, yesterday);
+  return getObligation(today);
+}
+
+// Manual pick from /day when nothing carried over. No-ops (returns the
+// existing row) if one already exists — avoids a race clobbering an
+// already-decided obligation.
+function setObligationToday(text) {
+  if (!text) throw new Error('text required');
+  const today = kyivToday();
+  const existing = getObligation(today);
+  if (existing) return existing;
+  db.prepare('INSERT INTO obligations (day, text, source_day) VALUES (?, ?, NULL)').run(today, text);
+  return getObligation(today);
+}
+
+function decideObligationToday(outcome) {
+  if (!OBLIGATION_OUTCOMES.includes(outcome)) throw new Error('outcome must be taken|moved|dropped');
+  const today = kyivToday();
+  const existing = getObligation(today);
+  if (!existing) throw new Error('no obligation set for today');
+  db.prepare("UPDATE obligations SET outcome = ?, decided_at = datetime('now') WHERE day = ?").run(outcome, today);
+  return getObligation(today);
 }
 
 function getDay(mode) {
   if (!MODES.includes(mode)) throw new Error('mode must be hands|head|ears');
-  const yesterday = kyivToday(-1);
-  const prevCapture = getCapture(yesterday);
-  const obligation = prevCapture && prevCapture.tomorrow ? prevCapture.tomorrow : null;
+  const obligation = ensureObligationForToday();
   const { top } = projectsMenu(mode);
   return { obligation, topics: top.slice(0, 2) };
 }
@@ -167,9 +222,10 @@ function parkStaleProjects() {
 }
 
 module.exports = {
-  MODES, PROJECT_STATUSES,
+  MODES, PROJECT_STATUSES, OBLIGATION_OUTCOMES,
   listProjects, createProject, patchProject, projectsMenu, touchProjects,
   upsertCapture, getCapture, listCapturesRecent, stats, getDay,
+  getObligation, setObligationToday, decideObligationToday,
   recordDashboardOpen,
   pickParkedForReview, recordParkedReview,
   parkStaleProjects,

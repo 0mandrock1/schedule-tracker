@@ -89,6 +89,16 @@ CREATE TABLE IF NOT EXISTS dashboard_opens (
   opened_at TEXT NOT NULL DEFAULT (datetime('now')),
   ua TEXT
 );
+
+CREATE TABLE IF NOT EXISTS obligations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  day DATE UNIQUE NOT NULL,
+  text TEXT NOT NULL,
+  source_day DATE,
+  outcome TEXT,
+  decided_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `);
 
 // Seed the project map once — the old Craft "Меню дня — ротація тем" doc is retired in
