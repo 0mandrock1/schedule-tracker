@@ -390,13 +390,40 @@ function setDayItemSlot(id, slot) {
   return db.prepare('SELECT * FROM day_items WHERE id = ?').get(id);
 }
 
+// `done = null` un-decides the row (clears decided_at too) — needed because a
+// decision has to be reversible from the phone, not just correctable. Existing
+// callers pass 'yes'|'no'|'partial' and are unaffected: they never send null,
+// and the PATCH route only reaches here when `done !== undefined`.
 function decideDayItem(id, done, note) {
-  if (!DAY_ITEM_DONE.includes(done)) throw new Error('done must be yes|no|partial');
+  const reset = done === null;
+  if (!reset && !DAY_ITEM_DONE.includes(done)) throw new Error('done must be yes|no|partial (or null to reset)');
   const info = db.prepare(`
-    UPDATE day_items SET done = ?, note = COALESCE(?, note), decided_at = datetime('now') WHERE id = ?
-  `).run(done, note ?? null, id);
+    UPDATE day_items SET done = ?, note = COALESCE(?, note),
+      decided_at = CASE WHEN ? IS NULL THEN NULL ELSE datetime('now') END
+    WHERE id = ?
+  `).run(done, note ?? null, done, id);
   if (!info.changes) throw new Error('day item not found');
   return db.prepare('SELECT * FROM day_items WHERE id = ?').get(id);
+}
+
+function getDayItem(id) {
+  return db.prepare('SELECT * FROM day_items WHERE id = ?').get(id);
+}
+
+// Ad-hoc item for today, outside the generated set (POST /task). `hook` is the
+// default kind because a thing typed in by hand mid-day is a low-bar nudge, not
+// a tracked habit or a theme session — keeping it out of `theme` also keeps the
+// completion metric in dayItemsStats() honest.
+function addDayItem({ title, slot, kind } = {}) {
+  const clean = typeof title === 'string' ? title.trim() : '';
+  if (!clean) throw new Error('title required');
+  const itemKind = kind || 'hook';
+  if (!DAY_ITEM_KINDS.includes(itemKind)) throw new Error(`kind must be ${DAY_ITEM_KINDS.join('|')}`);
+  const itemSlot = slot ?? null;
+  if (itemSlot !== null && !DAY_ITEM_SLOTS.includes(itemSlot)) throw new Error('slot must be morning|day|evening|night');
+  const info = db.prepare('INSERT INTO day_items (day, title, kind, slot, source) VALUES (?, ?, ?, ?, ?)')
+    .run(kyivToday(), clean, itemKind, itemSlot, 'manual');
+  return getDayItem(info.lastInsertRowid);
 }
 
 // ---- habits nudge (one-time) ----
@@ -461,7 +488,7 @@ module.exports = {
   recordSpiceVote,
   pickParkedForReview, recordParkedReview,
   parkStaleProjects,
-  generateDayItems, listDayItems, setDayItemSlot, decideDayItem,
+  generateDayItems, listDayItems, getDayItem, addDayItem, setDayItemSlot, decideDayItem,
   habitsNudgeCheck, markHabitsNudgeSent, listFlags, clearFlag,
   claimMeetingPing,
   kyivToday,

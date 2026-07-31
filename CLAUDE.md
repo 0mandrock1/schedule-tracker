@@ -25,6 +25,19 @@ Node 22 (nvm) / Express 5 / better-sqlite3 / node-ical. Vanilla JS фронте�
 - `GET /day?mode=` — pull: вчорашній `tomorrow` + 2 теми з mode. Ніколи не пуш.
 - `POST /dashboard-open`, `GET /parked-reviews/next`, `POST /parked-reviews`.
 - `GET /meetings?hours=` — read-only Calendar meetings.
+- `GET /calendar?from=&to=` — read-only вікно подій з календаря, згруповане по днях Kyiv:
+  `{"YYYY-MM-DD": [{uid, start, end, summary, allDay, isMeeting}]}`. Обидва параметри
+  обовʼязкові, формат `YYYY-MM-DD`, `to >= from`, діапазон <= 62 дні — інакше 400 з
+  поясненням. `isMeeting` — експортований предикат з `calendar.js` (той самий, по якому
+  фільтрує `getMeetingsInRange`), не друга копія логіки. **Імʼя шляху лишилось зі старої
+  Calendar-ери**, але статусів задач у відповіді нема — їх у календарі більше не існує.
+- `POST /task` (`{title, slot?, kind?}`) і `POST /status` (`{id, status}`) — **сумісні імена
+  шляхів зі старої Calendar-ери, реалізація нова**: обидва працюють по `day_items`, а не по
+  календарю. Раніше `/task` створював подію в Google Calendar, а `/status` переписував
+  `✅ `/`❌ ` префікс у title події; тепер `/task` вставляє рядок у `day_items` на сьогодні
+  (Kyiv, `source=manual`, `kind` за замовчуванням `hook`) і віддає 201, а `/status` — обгортка
+  над `store.decideDayItem`: `done`→`done='yes'`, `skipped`→`done='no'`, `pending`→`done=null`
+  (скидання рішення, `decided_at` теж чиститься). Неіснуючий id → 404. Жодного Calendar API.
 - `GET /spice-vote?day=&connector=&vote=up|down&token=` — click-through 👍/👎 from the prep-day
   "для смаку" block in the Craft doc (GET, plain hyperlink — `requireAuth` accepts the machine
   token via `?token=` too, not just headers/cookie, for exactly this case). Writes `spice_votes`;

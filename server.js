@@ -3,7 +3,7 @@ const express = require('express');
 const path = require('path');
 const crypto = require('crypto');
 const { db, importLegacy } = require('./db');
-const { getMeetingsInRange } = require('./calendar');
+const { getEventsInRange, getMeetingsInRange, isMeeting } = require('./calendar');
 const pomodoro = require('./pomodoro');
 const store = require('./store');
 
@@ -402,6 +402,106 @@ app.post('/schedule-tracker-api/meeting-ping-claim', (req, res) => {
   const { key } = req.body || {};
   if (!key) return res.status(400).json({ error: 'key required' });
   res.json({ claimed: store.claimMeetingPing(key) });
+});
+
+// ---- compatibility routes kept from the Calendar era (paths only) ----
+// `/status` and `/task` are the original path names from when Google Calendar WAS
+// the database: `/status` rewrote a `✅ `/`❌ ` prefix into the event title and
+// `/task` created a calendar event. Both now operate purely on `day_items` in the
+// local store — the paths survived so existing callers/bookmarks keep working, the
+// implementations did not. Nothing here touches the Calendar API.
+
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+const CALENDAR_MAX_DAYS = 62;
+// Kyiv, not UTC: a 23:30 Kyiv event must land on the day the owner lived it,
+// which is what every other date in this store (kyivToday) already means.
+const kyivDayFmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Kyiv', year: 'numeric', month: '2-digit', day: '2-digit' });
+
+// Round-trip check, because V8 silently rolls '2026-02-31' over into March
+// instead of returning Invalid Date — a typo'd day would otherwise return a
+// window the caller never asked for.
+function parseDay(value) {
+  if (!DAY_RE.test(value)) return null;
+  const d = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== value) return null;
+  return d;
+}
+
+function shiftDay(date, days) {
+  return new Date(date.getTime() + days * 86400000).toISOString().slice(0, 10);
+}
+
+// Read-only calendar window grouped by Kyiv day. Carries no task status at all —
+// statuses live in `day_items` now, the calendar no longer encodes them.
+app.get('/schedule-tracker-api/calendar', async (req, res) => {
+  const { from, to } = req.query;
+  if (!from || !to) return res.status(400).json({ error: 'from and to required (YYYY-MM-DD)' });
+  const fromDate = parseDay(String(from));
+  const toDate = parseDay(String(to));
+  if (!fromDate) return res.status(400).json({ error: `from must be a valid date in YYYY-MM-DD format, got "${from}"` });
+  if (!toDate) return res.status(400).json({ error: `to must be a valid date in YYYY-MM-DD format, got "${to}"` });
+  if (toDate < fromDate) return res.status(400).json({ error: `to (${to}) must not be earlier than from (${from})` });
+  const days = Math.round((toDate - fromDate) / 86400000) + 1;
+  // The iCal feed is re-parsed and RRULEs expanded per request (60s cache); an
+  // unbounded window is a cheap way to hang the event loop.
+  if (days > CALENDAR_MAX_DAYS) {
+    return res.status(400).json({ error: `range must not exceed ${CALENDAR_MAX_DAYS} days, got ${days}` });
+  }
+
+  try {
+    // getEventsInRange takes a UTC window but we group by Kyiv day (UTC+2/+3), so
+    // fetch a day wider on each side and let the key filter below trim it —
+    // otherwise a 01:00 Kyiv event on the first day falls outside the UTC window.
+    const events = await getEventsInRange(shiftDay(fromDate, -1), shiftDay(toDate, 1));
+    const byDay = {};
+    for (const ev of events) {
+      const key = kyivDayFmt.format(ev.start);
+      if (key < from || key > to) continue; // UTC-window edges spilling outside the asked-for Kyiv days
+      (byDay[key] ||= []).push({
+        uid: ev.uid,
+        start: ev.start.toISOString(),
+        end: ev.end.toISOString(),
+        summary: ev.summary || '',
+        allDay: Boolean(ev.allDay),
+        isMeeting: isMeeting(ev),
+      });
+    }
+    for (const key of Object.keys(byDay)) byDay[key].sort((a, b) => a.start.localeCompare(b.start));
+    res.json(byDay);
+  } catch (err) {
+    res.status(502).json({ error: 'calendar fetch failed', detail: err.message });
+  }
+});
+
+// Compat wrapper over store.decideDayItem. `pending` is the reset case — the old
+// Calendar version expressed it by stripping the title prefix; here it nulls
+// `done` so the item goes back to undecided rather than being marked skipped.
+const STATUS_TO_DONE = { done: 'yes', skipped: 'no', pending: null };
+
+app.post('/schedule-tracker-api/status', (req, res) => {
+  const { id, status } = req.body || {};
+  if (!Object.prototype.hasOwnProperty.call(STATUS_TO_DONE, status)) {
+    return res.status(400).json({ error: 'status must be done|skipped|pending' });
+  }
+  const itemId = Number(id);
+  if (!Number.isInteger(itemId) || itemId <= 0) return res.status(400).json({ error: 'id required (day_items row id)' });
+  if (!store.getDayItem(itemId)) return res.status(404).json({ error: `day item ${itemId} not found` });
+  try {
+    res.json(store.decideDayItem(itemId, STATUS_TO_DONE[status], (req.body || {}).note));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Compat wrapper over store.addDayItem: same path as the old "create a calendar
+// event" endpoint, but the row lands in `day_items` for today (Kyiv) instead.
+app.post('/schedule-tracker-api/task', (req, res) => {
+  try {
+    const { title, slot, kind } = req.body || {};
+    res.status(201).json(store.addDayItem({ title, slot, kind }));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 
 app.use('/schedule-tracker', express.static(path.join(__dirname, 'public')));

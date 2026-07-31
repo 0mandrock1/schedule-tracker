@@ -104,4 +104,7 @@ async function getMeetingsInRange(hours = 24) {
     .sort((a, b) => a.start.localeCompare(b.start));
 }
 
-module.exports = { getEventsInRange, getMeetingsInRange };
+// isMeeting is exported so GET /calendar can flag meetings with exactly the same
+// predicate getMeetingsInRange filters by — two copies of "what counts as a meeting"
+// would drift apart the first time the [meet] convention changes.
+module.exports = { getEventsInRange, getMeetingsInRange, isMeeting };

@@ -120,6 +120,8 @@ rate-limited to 10 attempts / 15 min per IP (in-memory), 429 over the limit.
 | POST | `/day-items/generate` | `{ mode? }` — build today's checklist |
 | GET | `/day-items?day=` | Today's items |
 | PATCH | `/day-items/:id` | `{ done, note, slot }` |
+| POST | `/task` | `{ title, slot?, kind? }` → 201 + the new `day_items` row for today (Kyiv), `source=manual`, `kind` defaults to `hook`. Compat path name from the Calendar era — it no longer creates a calendar event. |
+| POST | `/status` | `{ id, status }`, `status` ∈ `done, skipped, pending` → the updated `day_items` row. Maps to `done=yes / no / null`; `pending` un-decides the item. 404 on an unknown id. Compat path name — it no longer rewrites an event title. |
 | GET | `/habits-nudge-check` | One-time "time to add a habit" gate (>= 2026-08-07) |
 | POST | `/habits-nudge-sent` | Marks the one-time nudge as fired (persisted in `flags`) |
 
@@ -128,6 +130,7 @@ rate-limited to 10 attempts / 15 min per IP (in-memory), 429 over the limit.
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/meetings?hours=` | Real meetings only (attendees or `[meet]`), never task statuses |
+| GET | `/calendar?from=&to=` | Events grouped by Kyiv day: `{ "YYYY-MM-DD": [{ uid, start, end, summary, allDay, isMeeting }] }`. Both dates required, `YYYY-MM-DD`, `to >= from`, range <= 62 days — otherwise 400 with the reason. `isMeeting` uses the exported `isMeeting` predicate, the same one `getMeetingsInRange` filters by. Compat path name; carries no task statuses, because the calendar no longer holds any. |
 | POST | `/meeting-ping-claim` | `{ key }` → `{ claimed }` — atomic dedup claim so a bot restart can't double-ping |
 
 ### Legacy / side features (untouched by the rewrite)

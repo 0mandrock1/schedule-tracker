@@ -126,6 +126,23 @@ async function checkEndpoints() {
     });
   }
 
+  // compat routes carried over from the Calendar era (paths only — they run on
+  // day_items now). Only the read and validation paths are exercised here, so a
+  // verify run never leaves a stray day_items row behind.
+  const WEEK_OUT = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Kyiv' }).format(new Date(Date.now() + 7 * 86400000));
+  await hit('GET /calendar (сьогодні +7)', 'GET', `/calendar?from=${TODAY}&to=${WEEK_OUT}`, {
+    validate: (p) => (p && typeof p === 'object' && !Array.isArray(p)
+      ? null
+      : `очікував обʼєкт день->події, отримав ${Array.isArray(p) ? 'масив' : typeof p}`),
+  });
+  await hit('GET /calendar (to < from -> 400)', 'GET', `/calendar?from=${WEEK_OUT}&to=${TODAY}`, { expect: 400 });
+  await hit('GET /calendar (>62 днів -> 400)', 'GET', '/calendar?from=2026-01-01&to=2026-12-31', { expect: 400 });
+  await hit('GET /calendar (без параметрів -> 400)', 'GET', '/calendar', { expect: 400 });
+  await hit('GET /calendar (неіснуюча дата -> 400)', 'GET', '/calendar?from=2026-02-31&to=2026-03-05', { expect: 400 });
+  await hit('POST /status (неіснуючий id -> 404)', 'POST', '/status', { body: { id: 999999999, status: 'done' }, expect: 404 });
+  await hit('POST /status (невалідний status -> 400)', 'POST', '/status', { body: { id: 1, status: 'maybe' }, expect: 400 });
+  await hit('POST /task (порожній title -> 400)', 'POST', '/task', { body: { title: '' }, expect: 400 });
+
   // static frontend
   try {
     const res = await fetch(`${BASE}/schedule-tracker/`);
