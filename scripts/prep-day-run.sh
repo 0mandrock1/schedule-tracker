@@ -32,8 +32,16 @@ fi
 
 echo "[prep-day-run] mode=$MODE day=$DAY starting $(date -Is)" >> "$RUNLOG"
 
-OUTPUT="$(cd "$DIR" && claude -p "/prep-day" --model sonnet --permission-mode acceptEdits < /dev/null 2>>"$RUNLOG")"
-STATUS=$?
+PROMPT="Прочитай /root/claude-config/skills/user/prep-day/SKILL.md і виконай цей скіл повністю для сьогоднішнього дня (режим: ${MODE:-auto}). Створи денний Craft-документ згідно зі скілом. ОСТАННІМ РЯДКОМ відповіді виведи лише URL створеного документа у форматі https://docs.craft.do/editor/d/... і нічого більше."
+ATTEMPT=1
+while :; do
+  OUTPUT="$(cd "$DIR" && claude -p "$PROMPT" --model sonnet < /dev/null 2>>"$RUNLOG")"
+  STATUS=$?
+  if [ "$STATUS" -eq 0 ] && ! echo "$OUTPUT" | grep -qiE '529|overloaded|rate limit|usage limit'; then break; fi
+  if [ "$ATTEMPT" -ge 3 ]; then break; fi
+  echo "[prep-day-run] attempt $ATTEMPT failed (status=$STATUS), retrying in 60s" >> "$RUNLOG"
+  ATTEMPT=$((ATTEMPT+1)); sleep 60
+done
 echo "$OUTPUT" >> "$RUNLOG"
 echo "[prep-day-run] exit=$STATUS $(date -Is)" >> "$RUNLOG"
 
