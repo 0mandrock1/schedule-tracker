@@ -59,7 +59,10 @@ Google Calendar → Settings → your calendar → "Secret address in iCal forma
 | Var | Purpose |
 |---|---|
 | `PORT` | HTTP port (default 3463) |
-| `SCHEDULE_PASSCODE` | Shared passcode gating all `/schedule-tracker-api/*` routes and the frontend. Empty disables the gate. |
+| `SCHEDULE_USER` | Login username for the web dashboard. |
+| `SCHEDULE_PASS_HASH` | scrypt hash of the login password, format `scrypt:saltHex:hashHex` — generate with `node scripts/hash-password.js <password>`. Never store the plaintext password. |
+| `SCHEDULE_SESSION_SECRET` | HMAC key signing the session cookie. Random 32+ bytes hex, e.g. `openssl rand -hex 32`. |
+| `SCHEDULE_API_TOKEN` | Bearer token for machine callers (the Telegram bot) — sent as `x-api-token` or `Authorization: Bearer`, bypasses the login form. Random 32+ bytes hex. |
 | `ICAL_URL` | Your calendar's private iCal address (Google Calendar → Settings → your calendar → "Secret address in iCal format"). Required — this URL embeds a secret token, never commit it. |
 
 ### Running
@@ -85,7 +88,10 @@ ExecStart=/usr/bin/node /path/to/schedule-tracker/server.js
 Restart=always
 RestartSec=5
 Environment="PORT=3463"
-Environment="SCHEDULE_PASSCODE=your-passcode"
+Environment="SCHEDULE_USER=your-username"
+Environment="SCHEDULE_PASS_HASH=scrypt:...:..."
+Environment="SCHEDULE_SESSION_SECRET=..."
+Environment="SCHEDULE_API_TOKEN=..."
 
 [Install]
 WantedBy=multi-user.target
@@ -93,8 +99,9 @@ WantedBy=multi-user.target
 
 ## API
 
-All `/schedule-tracker-api/*` routes require an `x-passcode` header (or `?passcode=`) matching
-`SCHEDULE_PASSCODE`.
+All `/schedule-tracker-api/*` routes (except `/login`, `/logout`) require either a valid `st_session`
+login cookie (obtained via `POST /login`) or an `x-api-token`/`Authorization: Bearer` header matching
+`SCHEDULE_API_TOKEN`.
 
 | Method | Path | Purpose |
 |---|---|---|

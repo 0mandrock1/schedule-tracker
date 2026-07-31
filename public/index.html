@@ -49,7 +49,8 @@
 
 <div id="gate">
   <h1>Schedule Tracker</h1>
-  <input id="passcode-input" type="password" placeholder="passcode" autofocus>
+  <input id="login-username" type="text" placeholder="логін" autocomplete="username" autofocus>
+  <input id="login-password" type="password" placeholder="пароль" autocomplete="current-password">
   <button id="gate-submit">Увійти</button>
   <div class="err" id="gate-err"></div>
 </div>
@@ -100,34 +101,42 @@
 
 <script>
 const API = '/schedule-tracker-api';
-const PASS_KEY = 'st_passcode';
 
 function apiFetch(path, opts={}){
-  const passcode = sessionStorage.getItem(PASS_KEY) || '';
-  opts.headers = Object.assign({'x-passcode': passcode, 'Content-Type':'application/json'}, opts.headers||{});
+  opts.headers = Object.assign({'Content-Type':'application/json'}, opts.headers||{});
+  opts.credentials = 'same-origin';
   return fetch(API+path, opts);
 }
 
-async function tryPasscode(code){
-  sessionStorage.setItem(PASS_KEY, code);
+async function tryLogin(username, password){
+  const r = await apiFetch('/login', { method: 'POST', body: JSON.stringify({ username, password }) });
+  if(r.status === 429) return 'rate-limited';
+  return r.ok ? 'ok' : 'bad';
+}
+
+async function checkSession(){
   const r = await apiFetch('/stats');
-  if(r.status === 401){ sessionStorage.removeItem(PASS_KEY); return false; }
-  return true;
+  return r.status !== 401;
 }
 
 document.getElementById('gate-submit').onclick = async () => {
-  const code = document.getElementById('passcode-input').value;
-  const ok = await tryPasscode(code);
-  if(ok){
+  const username = document.getElementById('login-username').value;
+  const password = document.getElementById('login-password').value;
+  const result = await tryLogin(username, password);
+  if(result === 'ok'){
     document.getElementById('gate').style.display = 'none';
     document.getElementById('app').style.display = '';
     init();
+  } else if(result === 'rate-limited') {
+    document.getElementById('gate-err').textContent = 'Забагато спроб, спробуй пізніше';
   } else {
-    document.getElementById('gate-err').textContent = 'Невірний код';
+    document.getElementById('gate-err').textContent = 'Невірний логін або пароль';
   }
 };
-document.getElementById('passcode-input').addEventListener('keydown', e=>{
-  if(e.key === 'Enter') document.getElementById('gate-submit').click();
+['login-username','login-password'].forEach(id => {
+  document.getElementById(id).addEventListener('keydown', e=>{
+    if(e.key === 'Enter') document.getElementById('gate-submit').click();
+  });
 });
 
 document.querySelectorAll('.tab').forEach(tab => {
@@ -203,15 +212,13 @@ function init(){
 }
 
 (function tryAutoLogin(){
-  if(sessionStorage.getItem(PASS_KEY)){
-    tryPasscode(sessionStorage.getItem(PASS_KEY)).then(ok => {
-      if(ok){
-        document.getElementById('gate').style.display = 'none';
-        document.getElementById('app').style.display = '';
-        init();
-      }
-    });
-  }
+  checkSession().then(ok => {
+    if(ok){
+      document.getElementById('gate').style.display = 'none';
+      document.getElementById('app').style.display = '';
+      init();
+    }
+  });
 })();
 </script>
 </body>
