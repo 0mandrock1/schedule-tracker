@@ -126,7 +126,122 @@ CREATE TABLE IF NOT EXISTS flags (
   key TEXT PRIMARY KEY,
   fired_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS rituals (
+  id INTEGER PRIMARY KEY,
+  name TEXT UNIQUE,
+  emoji TEXT,
+  mode TEXT,
+  slot TEXT,
+  cadence TEXT NOT NULL,
+  weight REAL DEFAULT 1.0,
+  enabled INTEGER DEFAULT 1,
+  last_done DATE,
+  streak INTEGER DEFAULT 0,
+  created_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS day_plans (
+  id INTEGER PRIMARY KEY,
+  day DATE UNIQUE,
+  mode TEXT,
+  md TEXT,
+  html TEXT,
+  data_json TEXT,
+  generated_at TEXT,
+  source TEXT
+);
+
+CREATE TABLE IF NOT EXISTS templates (
+  name TEXT PRIMARY KEY,
+  md TEXT,
+  updated_at TEXT,
+  updated_by TEXT
+);
 `);
+
+// flags predates the `value` column (used to persist the one-time pickMode salt) — add it
+// if missing, same idempotent pattern as the pomodoro_log columns below.
+const flagsCols = db.prepare('PRAGMA table_info(flags)').all().map(c => c.name);
+if (!flagsCols.includes('value')) db.exec('ALTER TABLE flags ADD COLUMN value TEXT');
+
+// ---- 2026-08-05 taxonomy rework: 5 modes (hands/head/ears/body/magic) + rituals registry ----
+// Idempotent — re-run safely on every startup. See schedule-tracker/CLAUDE.md and the
+// cc/daybot-core task brief for the "why" (KB/Skills retired, body+magic modes added).
+
+const RETIRED_PROJECTS = ['KB (Craft)', 'Skills/агенти'];
+const retireProject = db.prepare("UPDATE projects SET status = 'dead' WHERE name = ? AND status != 'dead'");
+for (const name of RETIRED_PROJECTS) retireProject.run(name);
+
+const NEW_PROJECTS = [
+  { name: 'Заняття на музичному інструменті', emoji: '🎸', cluster: 'body', mode: 'body' },
+  { name: 'Таро: записи', emoji: '📓', cluster: 'tarot', mode: 'magic' },
+  { name: 'Таро: сесія', emoji: '🃏', cluster: 'tarot', mode: 'magic' },
+];
+const insertProjectIfMissing = db.prepare(`
+  INSERT INTO projects (name, emoji, cluster, mode) SELECT ?, ?, ?, ?
+  WHERE NOT EXISTS (SELECT 1 FROM projects WHERE name = ?)
+`);
+for (const p of NEW_PROJECTS) insertProjectIfMissing.run(p.name, p.emoji, p.cluster, p.mode, p.name);
+
+const RITUAL_SEED = [
+  { name: 'Чистка зубів', emoji: '🦷', mode: 'body', slot: 'morning', cadence: 'daily' },
+  { name: 'Спорт', emoji: '🏃', mode: 'body', slot: null, cadence: 'weekly:3' },
+  { name: 'Підтягування', emoji: '💪', mode: 'body', slot: null, cadence: 'weekly:4' },
+  { name: 'Поїсти нормально', emoji: '🍲', mode: 'body', slot: null, cadence: 'daily' },
+  { name: 'Повідпочивати', emoji: '🛋', mode: 'body', slot: null, cadence: 'weekly:5' },
+  { name: 'Відпочити', emoji: '😴', mode: 'body', slot: 'evening', cadence: 'daily' },
+  { name: 'Пограти в компʼютер', emoji: '🎮', mode: 'head', slot: null, cadence: 'weekly:3' },
+  { name: 'Таро: день', emoji: '🔮', mode: 'magic', slot: 'morning', cadence: 'daily' },
+];
+const insertRitual = db.prepare(`
+  INSERT INTO rituals (name, emoji, mode, slot, cadence, created_at)
+  VALUES (@name, @emoji, @mode, @slot, @cadence, datetime('now'))
+  ON CONFLICT(name) DO NOTHING
+`);
+for (const r of RITUAL_SEED) insertRitual.run(r);
+
+// Legacy config/baseline.json + config/habits.json → rituals, one time only, mapped onto
+// the seed above where an equivalent already exists (avoids near-duplicate names like
+// "Почистити зуби" vs "Чистка зубів"). Files themselves stay untouched on disk (legacy).
+const BASELINE_RITUAL_ALIAS = {
+  'Почистити зуби': 'Чистка зубів',
+  'Поїсти нормально': 'Поїсти нормально',
+  'Пограти в компʼютер': 'Пограти в компʼютер',
+  'Підтягування': 'Підтягування',
+};
+function migrateLegacyConfigToRituals() {
+  const already = db.prepare("SELECT value FROM flags WHERE key = 'legacy_config_migrated'").get();
+  if (already) return;
+  try {
+    const baseline = JSON.parse(fs.readFileSync(path.join(__dirname, 'config', 'baseline.json'), 'utf8'));
+    for (const text of Array.isArray(baseline) ? baseline : []) {
+      const aliasName = BASELINE_RITUAL_ALIAS[text] || text;
+      insertRitual.run({ name: aliasName, emoji: null, mode: 'head', slot: null, cadence: 'daily' });
+    }
+  } catch (err) { /* baseline.json missing/unreadable — nothing to migrate */ }
+  try {
+    const habits = JSON.parse(fs.readFileSync(path.join(__dirname, 'config', 'habits.json'), 'utf8'));
+    for (const h of Array.isArray(habits) ? habits : []) {
+      if (!h || !h.title) continue;
+      insertRitual.run({ name: h.title, emoji: null, mode: 'head', slot: h.slot || null, cadence: 'daily' });
+    }
+  } catch (err) { /* habits.json missing/unreadable — nothing to migrate */ }
+  db.prepare("INSERT OR REPLACE INTO flags (key, value, fired_at) VALUES ('legacy_config_migrated', '1', datetime('now'))").run();
+}
+migrateLegacyConfigToRituals();
+
+// Seed the day-plan template from config/day-template.md the first time this table is
+// empty for name='day' — after that the DB row is the source of truth (see template.js).
+function seedDayTemplate() {
+  const existing = db.prepare("SELECT 1 FROM templates WHERE name = 'day'").get();
+  if (existing) return;
+  try {
+    const md = fs.readFileSync(path.join(__dirname, 'config', 'day-template.md'), 'utf8');
+    db.prepare("INSERT INTO templates (name, md, updated_at, updated_by) VALUES ('day', ?, datetime('now'), 'seed')").run(md);
+  } catch (err) { /* config/day-template.md missing — leave templates empty, template.js handles fallback */ }
+}
+seedDayTemplate();
 
 // Seed the project map once — the old Craft "Меню дня — ротація тем" doc is retired in
 // favor of this table (see Phase 1 of the 2026-07-31 rewrite). Emoji doubles as a cluster

@@ -3,8 +3,20 @@
 const { db } = require('./db');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
+// Lazy require — calendar.js throws at load time if ICAL_URL isn't set, and store.js
+// should still be requireable on its own (tests, scripts) without that env var.
+let _calendar = null;
+function calendar() {
+  if (!_calendar) _calendar = require('./calendar');
+  return _calendar;
+}
 
-const MODES = ['hands', 'head', 'ears'];
+// 2026-08-05 taxonomy rework: hands/head/ears kept, body (physical/rest) and magic
+// (tarot) added. Old rows with mode NULL/unknown are treated as 'head' at read time
+// (see modeOrDefault below) — nothing rewrites historical data.
+const MODES = ['hands', 'head', 'ears', 'body', 'magic'];
+const MODE_LABELS = { hands: '🔌 руки', head: '💻 голова', ears: '🎧 вуха', body: '🫀 тіло', magic: '🔮 магія' };
 const PROJECT_STATUSES = ['active', 'parked', 'dead'];
 const PARK_AFTER_DAYS = 14;
 
@@ -25,7 +37,7 @@ function listProjects({ status, mode } = {}) {
 }
 
 function createProject({ name, emoji, cluster, mode }) {
-  if (!name || !MODES.includes(mode)) throw new Error('name and mode(hands|head|ears) required');
+  if (!name || !MODES.includes(mode)) throw new Error('name and mode(hands|head|ears|body|magic) required');
   const info = db.prepare('INSERT INTO projects (name, emoji, cluster, mode) VALUES (?, ?, ?, ?)')
     .run(name, emoji || null, cluster || null, mode);
   return db.prepare('SELECT * FROM projects WHERE id = ?').get(info.lastInsertRowid);
@@ -41,7 +53,7 @@ function patchProject(id, fields) {
     mode: fields.mode ?? existing.mode,
     status: fields.status ?? existing.status,
   };
-  if (!MODES.includes(next.mode)) throw new Error('mode must be hands|head|ears');
+  if (!MODES.includes(next.mode)) throw new Error('mode must be hands|head|ears|body|magic');
   if (!PROJECT_STATUSES.includes(next.status)) throw new Error('status must be active|parked|dead');
   db.prepare('UPDATE projects SET name=?, emoji=?, cluster=?, mode=?, status=? WHERE id=?')
     .run(next.name, next.emoji, next.cluster, next.mode, next.status, id);
@@ -56,7 +68,7 @@ function touchProjects(ids, when = new Date().toISOString()) {
 }
 
 function projectsMenu(mode) {
-  if (!MODES.includes(mode)) throw new Error('mode must be hands|head|ears');
+  if (!MODES.includes(mode)) throw new Error('mode must be hands|head|ears|body|magic');
   const active = listProjects({ status: 'active', mode });
   return { top: active.slice(0, 6), rest: active.slice(6) };
 }
@@ -247,7 +259,7 @@ function decideObligationToday(outcome) {
 }
 
 function getDay(mode) {
-  if (!MODES.includes(mode)) throw new Error('mode must be hands|head|ears');
+  if (!MODES.includes(mode)) throw new Error('mode must be hands|head|ears|body|magic');
   const obligation = ensureObligationForToday();
   const { top } = projectsMenu(mode);
   return { obligation, topics: top.slice(0, 2) };
@@ -278,6 +290,180 @@ function recordParkedReview(project_id, answer) {
   if (answer === 'alive') db.prepare("UPDATE projects SET status = 'active' WHERE id = ?").run(project_id);
   else if (answer === 'dead') db.prepare("UPDATE projects SET status = 'dead' WHERE id = ?").run(project_id);
   // 'sleeping' (спить далі) leaves status as parked
+}
+
+// ---- mode picker ----
+// Deterministic weighted random: same day → same mode, forever (no Math.random
+// anywhere in this section). Seed = hash(day + one-time salt persisted in `flags`).
+// Weight per mode = 1 + 0.35 * min(days since it last fell, 6); yesterday's mode is
+// further multiplied by 0.15 (rare, not impossible). History comes from `day_plans`
+// (the mode column is written the first time a day's items are generated), not a
+// separate log — one place, not two copies of "when did X last happen".
+
+const MODE_SALT_KEY = 'mode_pick_salt';
+
+function ensureModeSalt() {
+  const row = db.prepare('SELECT value FROM flags WHERE key = ?').get(MODE_SALT_KEY);
+  if (row && row.value) return row.value;
+  const salt = crypto.randomBytes(8).toString('hex');
+  db.prepare("INSERT OR REPLACE INTO flags (key, value, fired_at) VALUES (?, ?, datetime('now'))").run(MODE_SALT_KEY, salt);
+  return salt;
+}
+
+function hashStr(s) {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function shiftDayStr(day, deltaDays) {
+  return new Date(new Date(`${day}T12:00:00Z`).getTime() + deltaDays * 86400000).toISOString().slice(0, 10);
+}
+
+function lastModePickDates(beforeDay) {
+  const rows = db.prepare('SELECT mode, MAX(day) as day FROM day_plans WHERE day < ? AND mode IS NOT NULL GROUP BY mode').all(beforeDay);
+  const out = {};
+  for (const r of rows) out[r.mode] = r.day;
+  return out;
+}
+
+function getDayPlanMode(day) {
+  const row = db.prepare('SELECT mode FROM day_plans WHERE day = ?').get(day);
+  return row ? row.mode : null;
+}
+
+function pickMode(day) {
+  const salt = ensureModeSalt();
+  const rand = mulberry32(hashStr(day + salt));
+  const lastPicked = lastModePickDates(day);
+  const yesterdayMode = getDayPlanMode(shiftDayStr(day, -1));
+
+  const weights = MODES.map((m) => {
+    const lastDay = lastPicked[m];
+    let daysSince = 6;
+    if (lastDay) {
+      daysSince = Math.max(0, Math.min(6, Math.round((new Date(`${day}T12:00:00Z`) - new Date(`${lastDay}T12:00:00Z`)) / 86400000)));
+    }
+    let w = 1 + 0.35 * daysSince;
+    if (m === yesterdayMode) w *= 0.15;
+    return w;
+  });
+  const total = weights.reduce((a, b) => a + b, 0);
+  let r = rand() * total;
+  for (let i = 0; i < MODES.length; i++) {
+    r -= weights[i];
+    if (r <= 0) return MODES[i];
+  }
+  return MODES[MODES.length - 1];
+}
+
+function ensureDayPlanMode(day, mode) {
+  db.prepare(`
+    INSERT INTO day_plans (day, mode, generated_at, source) VALUES (?, ?, datetime('now'), 'day-items')
+    ON CONFLICT(day) DO NOTHING
+  `).run(day, mode);
+}
+
+// ---- calendar density (theme quota depends on how packed the day already is) ----
+// Meetings, not raw events — same predicate GET /calendar exports (isMeeting). A
+// calendar fetch failure counts as 0 meetings rather than blocking day-item generation.
+
+function themeQuotaForMeetingCount(n) {
+  if (n <= 0) return 4;
+  if (n === 1) return 3;
+  if (n === 2) return 2;
+  return 1;
+}
+
+async function countMeetingsForDay(day) {
+  const kyivDayFmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Kyiv', year: 'numeric', month: '2-digit', day: '2-digit' });
+  try {
+    const { getEventsInRange, isMeeting } = calendar();
+    const events = await getEventsInRange(shiftDayStr(day, -1), shiftDayStr(day, 1));
+    return events.filter((ev) => !ev.allDay && isMeeting(ev) && kyivDayFmt.format(ev.start) === day).length;
+  } catch (err) {
+    return 0;
+  }
+}
+
+// ---- rituals ----
+// Registry of rhythm-only commitments (no progress, just cadence) — distinct from
+// `projects`, which track last_touch/parking. `cadence` is 'daily' | 'weekly:N' |
+// 'gap:N', read by generateDayItems below.
+
+function listRituals({ enabled } = {}) {
+  let sql = 'SELECT * FROM rituals WHERE 1=1';
+  const params = [];
+  if (enabled !== undefined) { sql += ' AND enabled = ?'; params.push(enabled ? 1 : 0); }
+  sql += ' ORDER BY id ASC';
+  return db.prepare(sql).all(...params);
+}
+
+function isoWeekStart(day) {
+  const d = new Date(`${day}T12:00:00Z`);
+  const wd = d.getUTCDay() === 0 ? 7 : d.getUTCDay();
+  d.setUTCDate(d.getUTCDate() - (wd - 1));
+  return d.toISOString().slice(0, 10);
+}
+
+function ritualWeeklyDoneCount(ritualId, day) {
+  const weekStart = isoWeekStart(day);
+  const row = db.prepare("SELECT COUNT(*) as n FROM day_items WHERE source = ? AND done = 'yes' AND day >= ? AND day < ?")
+    .get(`ritual:${ritualId}`, weekStart, day);
+  return row.n;
+}
+
+// Decides which rituals land in today's day_items. `daily` fires whenever its own
+// mode matches today's mode, OR it's a `body` ritual (physical upkeep runs every day
+// regardless of the day's theme). `weekly:N` uses a random draw weighted up when the
+// week is behind quota. `gap:N` is deterministic: overdue once last_done is >= N days
+// old (or never done).
+function ritualsForDay(day, mode) {
+  const picked = [];
+  for (const ritual of listRituals({ enabled: true })) {
+    const [kind, nStr] = ritual.cadence.split(':');
+    const n = Number(nStr);
+    if (kind === 'daily') {
+      if (ritual.mode === mode || ritual.mode === 'body') picked.push(ritual);
+    } else if (kind === 'weekly') {
+      const done = ritualWeeklyDoneCount(ritual.id, day);
+      const weekday = isoWeekday(day);
+      const remainingDays = Math.max(1, 8 - weekday);
+      const needed = n - done;
+      const prob = needed <= 0 ? 0.05 : Math.min(1, (needed / remainingDays) * 1.2);
+      if (Math.random() < prob) picked.push(ritual);
+    } else if (kind === 'gap') {
+      const staleDays = ritual.last_done ? (new Date(`${day}T12:00:00Z`) - new Date(`${ritual.last_done}T12:00:00Z`)) / 86400000 : Infinity;
+      if (staleDays >= n) picked.push(ritual);
+    }
+  }
+  return picked;
+}
+
+// Keeps ritual.last_done/streak in sync when a ritual-derived day_item gets decided —
+// the completion record lives in day_items, this is just a cheap denormalized cursor
+// so gap:N/weekly:N lookups above don't have to rescan history on every call.
+function markRitualDecided(ritualId, day, done) {
+  if (done === 'yes') {
+    const ritual = db.prepare('SELECT * FROM rituals WHERE id = ?').get(ritualId);
+    if (!ritual) return;
+    const wasYesterday = ritual.last_done === shiftDayStr(day, -1);
+    const streak = wasYesterday ? ritual.streak + 1 : 1;
+    db.prepare('UPDATE rituals SET last_done = ?, streak = ? WHERE id = ?').run(day, streak, ritualId);
+  }
 }
 
 // ---- day_items ----
@@ -340,12 +526,29 @@ function listDayItems(day) {
   return db.prepare('SELECT * FROM day_items WHERE day = ? ORDER BY id ASC').all(day);
 }
 
-// Idempotent: if items already exist for `day`, returns them unchanged rather
-// than duplicating (the "Виставити на день" button/prep-day step may fire more
-// than once for the same day).
-function generateDayItems(day, mode) {
+// Weighted pick without replacement (weight = 1 + 0.1 * min(days since last_touch, 30)) —
+// reservoir-style: assign each candidate a random key = rand()^(1/weight), take the top N.
+function weightedPickWithoutReplacement(candidates, weightFn, n) {
+  const keyed = candidates.map((c) => ({ c, key: Math.pow(Math.random(), 1 / weightFn(c)) }));
+  keyed.sort((a, b) => b.key - a.key);
+  return keyed.slice(0, n).map((k) => k.c);
+}
+
+function projectStaleDays(project, now) {
+  return project.last_touch ? (now - new Date(project.last_touch).getTime()) / 86400000 : Infinity;
+}
+
+// Idempotent: if items already exist for `day`, returns them unchanged rather than
+// duplicating (the "Виставити на день" button/prep-day step may fire more than once
+// for the same day). `mode` picks the theme pool; falls back to pickMode(day) if
+// omitted/invalid so a caller never has to think about mode selection itself.
+async function generateDayItems(day, mode) {
   const existing = listDayItems(day);
   if (existing.length) return existing;
+
+  const existingPlanMode = getDayPlanMode(day);
+  const finalMode = existingPlanMode || (mode && MODES.includes(mode) ? mode : pickMode(day));
+  ensureDayPlanMode(day, finalMode);
 
   const insert = db.prepare('INSERT INTO day_items (day, title, kind, source) VALUES (?, ?, ?, ?)');
   const rows = [];
@@ -355,24 +558,25 @@ function generateDayItems(day, mode) {
     rows.push({ title: obligation.text, kind: 'obligation', source: `obligation:${obligation.id}` });
   }
 
-  for (const title of loadBaseline()) {
-    rows.push({ title, kind: 'baseline', source: 'baseline' });
+  for (const ritual of ritualsForDay(day, finalMode)) {
+    rows.push({ title: `${ritual.emoji ? ritual.emoji + ' ' : ''}${ritual.name}`, kind: 'habit', source: `ritual:${ritual.id}` });
   }
 
-  for (const habit of activeHabitsForDay(day)) {
-    rows.push({ title: habit.title, kind: 'habit', source: `habit:${habit.title}` });
+  const meetingCount = await countMeetingsForDay(day);
+  const quota = themeQuotaForMeetingCount(meetingCount);
+  const now = Date.now();
+  let pool = listProjects({ status: 'active', mode: finalMode });
+  if (pool.length < quota) {
+    const extra = listProjects({ status: 'active', mode: 'head' }).filter((p) => !pool.some((q) => q.id === p.id));
+    pool = pool.concat(extra);
   }
-
-  if (mode && MODES.includes(mode)) {
-    const { top } = projectsMenu(mode);
-    const now = Date.now();
-    for (const project of top.slice(0, 3)) {
-      const staleDays = project.last_touch ? (now - new Date(project.last_touch).getTime()) / 86400000 : Infinity;
-      if (staleDays > HOOK_STALE_DAYS) {
-        rows.push({ title: hookPhrase(project.name), kind: 'hook', source: `project:${project.id}` });
-      } else {
-        rows.push({ title: `${THEME_VERB} ${project.name}`, kind: 'theme', source: `project:${project.id}` });
-      }
+  const picks = weightedPickWithoutReplacement(pool, (p) => 1 + 0.1 * Math.min(projectStaleDays(p, now), 30), quota);
+  for (const project of picks) {
+    const staleDays = projectStaleDays(project, now);
+    if (staleDays > HOOK_STALE_DAYS) {
+      rows.push({ title: hookPhrase(project.name), kind: 'hook', source: `project:${project.id}` });
+    } else {
+      rows.push({ title: `${THEME_VERB} ${project.name}`, kind: 'theme', source: `project:${project.id}` });
     }
   }
 
@@ -397,12 +601,16 @@ function setDayItemSlot(id, slot) {
 function decideDayItem(id, done, note) {
   const reset = done === null;
   if (!reset && !DAY_ITEM_DONE.includes(done)) throw new Error('done must be yes|no|partial (or null to reset)');
-  const info = db.prepare(`
+  const item = db.prepare('SELECT * FROM day_items WHERE id = ?').get(id);
+  if (!item) throw new Error('day item not found');
+  db.prepare(`
     UPDATE day_items SET done = ?, note = COALESCE(?, note),
       decided_at = CASE WHEN ? IS NULL THEN NULL ELSE datetime('now') END
     WHERE id = ?
   `).run(done, note ?? null, done, id);
-  if (!info.changes) throw new Error('day item not found');
+  if (item.source && item.source.startsWith('ritual:')) {
+    markRitualDecided(Number(item.source.slice('ritual:'.length)), item.day, done);
+  }
   return db.prepare('SELECT * FROM day_items WHERE id = ?').get(id);
 }
 
@@ -467,6 +675,50 @@ function claimMeetingPing(key) {
   return info.changes > 0;
 }
 
+// ---- day_plans (rendered plan storage) ----
+
+function getDayPlan(day) {
+  return db.prepare('SELECT * FROM day_plans WHERE day = ?').get(day) || null;
+}
+
+function getLatestDayPlan() {
+  return db.prepare('SELECT * FROM day_plans WHERE md IS NOT NULL ORDER BY day DESC LIMIT 1').get() || null;
+}
+
+// The generator (bot/script) calls this once it has picked/rendered the day's plan.
+// Upserts by day — ensureDayPlanMode may already have created a mode-only row earlier
+// the same day; this fills in the rest without duplicating.
+function saveDayPlan(day, { mode, md, html, data }) {
+  if (!MODES.includes(mode)) throw new Error('mode must be hands|head|ears|body|magic');
+  db.prepare(`
+    INSERT INTO day_plans (day, mode, md, html, data_json, generated_at, source)
+    VALUES (?, ?, ?, ?, ?, datetime('now'), 'api')
+    ON CONFLICT(day) DO UPDATE SET
+      mode = excluded.mode, md = excluded.md, html = excluded.html,
+      data_json = excluded.data_json, generated_at = datetime('now'), source = 'api'
+  `).run(day, mode, md ?? null, html ?? null, JSON.stringify(data ?? {}));
+  return getDayPlan(day);
+}
+
+// ---- templates ----
+
+function getTemplate(name = 'day') {
+  return db.prepare('SELECT * FROM templates WHERE name = ?').get(name) || null;
+}
+
+function saveTemplate(md, name = 'day', updatedBy = 'api') {
+  db.prepare(`
+    INSERT INTO templates (name, md, updated_at, updated_by) VALUES (?, ?, datetime('now'), ?)
+    ON CONFLICT(name) DO UPDATE SET md = excluded.md, updated_at = datetime('now'), updated_by = excluded.updated_by
+  `).run(name, md, updatedBy);
+  return getTemplate(name);
+}
+
+function resetTemplate(name = 'day') {
+  const md = fs.readFileSync(path.join(__dirname, 'config', 'day-template.md'), 'utf8');
+  return saveTemplate(md, name, 'reset');
+}
+
 // ---- daily park sweep ----
 
 function parkStaleProjects() {
@@ -479,7 +731,7 @@ function parkStaleProjects() {
 }
 
 module.exports = {
-  MODES, PROJECT_STATUSES, OBLIGATION_OUTCOMES,
+  MODES, MODE_LABELS, PROJECT_STATUSES, OBLIGATION_OUTCOMES,
   DAY_ITEM_KINDS, DAY_ITEM_SLOTS, DAY_ITEM_DONE,
   listProjects, createProject, patchProject, projectsMenu, touchProjects,
   upsertCapture, getCapture, listCapturesRecent, stats, energyByProject, getDay,
@@ -492,4 +744,9 @@ module.exports = {
   habitsNudgeCheck, markHabitsNudgeSent, listFlags, clearFlag,
   claimMeetingPing,
   kyivToday,
+  pickMode, listRituals, ritualsForDay,
+  countMeetingsForDay, themeQuotaForMeetingCount,
+  ensureDayPlanMode, getDayPlanMode,
+  getDayPlan, getLatestDayPlan, saveDayPlan,
+  getTemplate, saveTemplate, resetTemplate,
 };

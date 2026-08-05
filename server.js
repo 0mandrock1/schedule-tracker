@@ -6,6 +6,7 @@ const { db, importLegacy } = require('./db');
 const { getEventsInRange, getMeetingsInRange, isMeeting } = require('./calendar');
 const pomodoro = require('./pomodoro');
 const store = require('./store');
+const template = require('./template');
 
 const PORT = process.env.PORT || 3463;
 
@@ -135,6 +136,10 @@ app.post('/schedule-tracker-api/logout', (req, res) => {
 });
 
 app.use('/schedule-tracker-api', requireAuth);
+
+app.get('/schedule-tracker-api/health', (req, res) => {
+  res.json({ ok: true, version: require('./package.json').version });
+});
 
 app.get('/schedule-tracker-api/counter', (req, res) => {
   const { from, to } = req.query;
@@ -335,10 +340,10 @@ app.get('/schedule-tracker-api/spice-vote', (req, res) => {
 // "Виставити на день" — generates today's day_items once (idempotent) from the
 // obligation, config/baseline.json, active config/habits.json entries, and
 // 2-3 theme picks for the given mode.
-app.post('/schedule-tracker-api/day-items/generate', (req, res) => {
+app.post('/schedule-tracker-api/day-items/generate', async (req, res) => {
   try {
     const day = store.kyivToday();
-    res.json(store.generateDayItems(day, (req.body || {}).mode));
+    res.json(await store.generateDayItems(day, (req.body || {}).mode));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -360,6 +365,76 @@ app.patch('/schedule-tracker-api/day-items/:id', (req, res) => {
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
+});
+
+// ---- day-plan storage + templater (2026-08-05 taxonomy rework) ----
+// The plan itself (mode + rendered md/html + the data it was rendered from) is stored
+// by whatever generates it (bot/script) via PUT; this server only stores/renders, it
+// never picks a mode or assembles day-plan data on its own initiative.
+
+function dayPlanJson(plan) {
+  return {
+    date: plan.day, mode: plan.mode, md: plan.md, html: plan.html,
+    data: JSON.parse(plan.data_json || '{}'), generated_at: plan.generated_at,
+  };
+}
+
+// Registered before /day-plan/:date so "latest" isn't swallowed as a literal date param.
+app.get('/schedule-tracker-api/day-plan/latest', (req, res) => {
+  const plan = store.getLatestDayPlan();
+  if (!plan) return res.status(404).json({ error: 'no day plan saved yet' });
+  res.json(dayPlanJson(plan));
+});
+
+app.get('/schedule-tracker-api/day-plan/:date', (req, res) => {
+  const plan = store.getDayPlan(req.params.date);
+  if (!plan || plan.md == null) return res.status(404).json({ error: `no day plan for ${req.params.date}` });
+  res.json(dayPlanJson(plan));
+});
+
+app.put('/schedule-tracker-api/day-plan/:date', (req, res) => {
+  try {
+    const { mode, md, html, data } = req.body || {};
+    res.json(dayPlanJson(store.saveDayPlan(req.params.date, { mode, md, html, data })));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Preview only — re-renders the day's already-stored `data` with the CURRENT template,
+// nothing is written back. Useful for iterating on the template against a real day.
+app.post('/schedule-tracker-api/day-plan/:date/render', (req, res) => {
+  const plan = store.getDayPlan(req.params.date);
+  if (!plan || !plan.data_json) return res.status(404).json({ error: `no stored data for ${req.params.date} to render` });
+  const tpl = store.getTemplate('day');
+  if (!tpl) return res.status(500).json({ error: 'template not found' });
+  const data = JSON.parse(plan.data_json);
+  const { md, warnings } = template.render(tpl.md, data);
+  const html = template.renderHtml(tpl.md, data);
+  res.json({ md, html, warnings });
+});
+
+app.get('/schedule-tracker-api/template', (req, res) => {
+  const tpl = store.getTemplate('day');
+  if (!tpl) return res.status(404).json({ error: 'template not found' });
+  res.json({ name: tpl.name, md: tpl.md, updated_at: tpl.updated_at });
+});
+
+app.put('/schedule-tracker-api/template', (req, res) => {
+  const { md } = req.body || {};
+  if (typeof md !== 'string' || !md) return res.status(400).json({ error: 'md required (string)' });
+  const { warnings, usedTokens } = template.render(md, {});
+  store.saveTemplate(md, 'day', 'api');
+  res.json({ ok: true, warnings, usedTokens });
+});
+
+app.get('/schedule-tracker-api/template/tokens', (req, res) => {
+  res.json(template.TEMPLATE_TOKENS);
+});
+
+app.post('/schedule-tracker-api/template/reset', (req, res) => {
+  const tpl = store.resetTemplate('day');
+  res.json({ name: tpl.name, md: tpl.md, updated_at: tpl.updated_at });
 });
 
 // One-time (no earlier than 2026-08-07 Kyiv, only while habits.json is still
