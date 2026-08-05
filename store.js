@@ -543,14 +543,10 @@ function projectStaleDays(project, now) {
 // for the same day). `mode` picks the theme pool; falls back to pickMode(day) if
 // omitted/invalid so a caller never has to think about mode selection itself.
 async function generateDayItems(day, mode) {
-  const existing = listDayItems(day);
-  if (existing.length) return existing;
-
   const existingPlanMode = getDayPlanMode(day);
   const finalMode = existingPlanMode || (mode && MODES.includes(mode) ? mode : pickMode(day));
   ensureDayPlanMode(day, finalMode);
 
-  const insert = db.prepare('INSERT INTO day_items (day, title, kind, source) VALUES (?, ?, ?, ?)');
   const rows = [];
 
   const obligation = getObligation(day) || ensureObligationForToday();
@@ -580,11 +576,19 @@ async function generateDayItems(day, mode) {
     }
   }
 
+  // Idempotency check has to live inside this synchronous transaction, not before the
+  // `await countMeetingsForDay` above — otherwise two concurrent calls both pass the
+  // check before either has inserted, and both proceed to insert (the original bug).
+  // INSERT OR IGNORE backs this up against the day_items UNIQUE(day,title,kind) index
+  // (see db.js) in case two transactions still race past the listDayItems check.
+  const insert = db.prepare('INSERT OR IGNORE INTO day_items (day, title, kind, source) VALUES (?, ?, ?, ?)');
   const tx = db.transaction((list) => {
+    const existing = listDayItems(day);
+    if (existing.length) return existing;
     for (const r of list) insert.run(day, r.title, r.kind, r.source);
+    return listDayItems(day);
   });
-  tx(rows);
-  return listDayItems(day);
+  return tx(rows);
 }
 
 function setDayItemSlot(id, slot) {
