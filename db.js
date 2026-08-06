@@ -190,6 +190,25 @@ const dayItemsCols = db.prepare('PRAGMA table_info(day_items)').all().map(c => c
 if (!dayItemsCols.includes('due_at')) db.exec('ALTER TABLE day_items ADD COLUMN due_at TEXT');
 if (!dayItemsCols.includes('notified_at')) db.exec('ALTER TABLE day_items ADD COLUMN notified_at TEXT');
 
+// ---- 2026-08-06 per-day accent colour (5feat P5) ----
+// theme_accent = one of the 9 palette-themes accent NAMES (see store.js ACCENTS),
+// picked once per day and stable for the whole day (regeneration must not re-roll it).
+// Nullable; back-filled/COALESCE'd by store.saveDayPlan, never overwritten in-day.
+const dayPlansCols = db.prepare('PRAGMA table_info(day_plans)').all().map(c => c.name);
+if (!dayPlansCols.includes('theme_accent')) db.exec('ALTER TABLE day_plans ADD COLUMN theme_accent TEXT');
+
+// ---- 2026-08-06 device whitelist for /day/ nginx Basic Auth (5feat P4) ----
+// One row per browser that cleared Basic Auth once; token lives in a day_device cookie
+// and in /etc/nginx/day-device-whitelist.map so nginx stops prompting that device.
+db.exec(`
+CREATE TABLE IF NOT EXISTS day_devices (
+  token TEXT PRIMARY KEY,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  last_seen_at TEXT,
+  label TEXT
+);
+`);
+
 // ---- 2026-08-05 taxonomy rework: 5 modes (hands/head/ears/body/magic) + rituals registry ----
 // Idempotent — re-run safely on every startup. See schedule-tracker/CLAUDE.md and the
 // cc/daybot-core task brief for the "why" (KB/Skills retired, body+magic modes added).
@@ -279,9 +298,10 @@ const PROJECT_SEED = [
   { name: 'Skills/агенти', emoji: '💻', cluster: 'software', mode: 'head' },
   { name: 'Livecoding Hydra/Strudel', emoji: '💻', cluster: 'software', mode: 'head' },
   { name: "Кар'єра (пошук роботи/інтерв'ю/резюме/портфоліо)", emoji: '💻', cluster: 'software', mode: 'head' },
-  { name: 'AV-проєкти (lumen-engine, sonargale, VR, EarForge)', emoji: '💻', cluster: 'software', mode: 'head' },
+  { name: 'AV-проєкти (sonargale, VR, EarForge)', emoji: '💻', cluster: 'software', mode: 'head' },
+  { name: 'TouchDesigner (візуал + гайди)', emoji: '🖼', cluster: 'software', mode: 'head' },
   { name: 'Контент (курс Bitwig, релізи, канал)', emoji: '💻', cluster: 'software', mode: 'head' },
-  { name: 'Onshape/Blender', emoji: '🖥', cluster: 'cad', mode: 'head' },
+  { name: 'Shapr3D/Blender', emoji: '🖥', cluster: 'cad', mode: 'head' },
   { name: 'Альбом — мастеринг', emoji: '🎛', cluster: 'mastering', mode: 'ears' },
   { name: 'Деки/діджеїнг', emoji: '🎧', cluster: 'dj', mode: 'ears' },
 ];
