@@ -441,7 +441,12 @@ app.get('/schedule-tracker-api/day-plan/:date', (req, res) => {
 app.put('/schedule-tracker-api/day-plan/:date', (req, res) => {
   try {
     const { mode, md, html, data } = req.body || {};
-    res.json(dayPlanJson(store.saveDayPlan(req.params.date, { mode, md, html, data })));
+    const saved = store.saveDayPlan(req.params.date, { mode, md, html, data });
+    // This is the genuine schedule/ritual generation path (generate-day-prompt.md's
+    // step 4) — arm the first-full-push latch here only. /template/regenerate below
+    // re-renders the same data and must NOT arm a fresh push.
+    if (saved.md) store.armDayFullPush(req.params.date);
+    res.json(dayPlanJson(saved));
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

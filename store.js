@@ -740,14 +740,22 @@ function unscheduledRituals(day) {
   return listRituals({ enabled: true }).filter((r) => !scheduled.has(r.id));
 }
 
-// ---- first full day-plan push latch (5feat P2) ----
-// One push of the full rendered plan per calendar day, fired by whichever write
-// (generate-day.sh OR /template/regenerate) first produces today's plan. Mirrors
-// claimMeetingPing: pending = today's plan has md and the latch isn't set yet; the
-// claim is atomic so a restart mid-poll can't double-send.
+// ---- first full day-plan push latch (5feat P2, fixed 2026-08-06) ----
+// One push of the full rendered plan per calendar day. MUST be armed only by
+// genuine schedule/ritual generation (PUT /day-plan/:date, the path
+// generate-day-prompt.md calls) via armDayFullPush() below — NOT by
+// /template/regenerate and NOT merely by "md is non-null". First cut inferred
+// pending from md-presence alone, so it fired off a pm2 restart mid-deploy
+// (boot-time checkFullPush) rather than off the actual morning generation.
+function armDayFullPush(day) {
+  db.prepare("INSERT OR IGNORE INTO flags (key, fired_at) VALUES (?, datetime('now'))").run(`day_full_push_armed:${day}`);
+}
+
 function dayFullPushPending(day) {
   const plan = getDayPlan(day);
   if (!plan || plan.md == null) return { pending: false };
+  const armed = db.prepare('SELECT 1 FROM flags WHERE key = ?').get(`day_full_push_armed:${day}`);
+  if (!armed) return { pending: false };
   const fired = db.prepare('SELECT 1 FROM flags WHERE key = ?').get(`day_full_push:${day}`);
   if (fired) return { pending: false };
   return { pending: true, plan: { day: plan.day, mode: plan.mode, md: plan.md } };
@@ -844,7 +852,7 @@ module.exports = {
   setDayItemDueAt, dueDayItemsPending, claimDayItemReminder,
   habitsNudgeCheck, markHabitsNudgeSent, listFlags, clearFlag,
   claimMeetingPing,
-  unscheduledRituals, dayFullPushPending, claimDayFullPush,
+  unscheduledRituals, dayFullPushPending, claimDayFullPush, armDayFullPush,
   registerDevice, listDeviceTokens,
   ACCENTS, pickAccentForDay,
   kyivToday,
