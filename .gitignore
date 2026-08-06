@@ -2,6 +2,7 @@ AUDIT.md
 config/*
 !config/baseline.json
 !config/day-template.md
+!config/generate-day-prompt.md
 !config/habits.example.json
 !config/habits.json
 !config/spice.json
