@@ -181,6 +181,15 @@ if (dupDayItemGroups.length) {
 }
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_day_items_day_title_kind ON day_items(day, title, kind)');
 
+// ---- 2026-08-06 day_items timed reminders: due_at + notified_at ----
+// due_at (ISO datetime, tz-qualified) = optional clock time for an item; the bot polls
+// items with due_at set and pings ~15 min before. notified_at is the dedup marker (set
+// atomically when the ping is claimed, same idea as the meeting-ping flag) so a restart
+// mid-window can't double-push. Both nullable, idempotent ALTERs on every startup.
+const dayItemsCols = db.prepare('PRAGMA table_info(day_items)').all().map(c => c.name);
+if (!dayItemsCols.includes('due_at')) db.exec('ALTER TABLE day_items ADD COLUMN due_at TEXT');
+if (!dayItemsCols.includes('notified_at')) db.exec('ALTER TABLE day_items ADD COLUMN notified_at TEXT');
+
 // ---- 2026-08-05 taxonomy rework: 5 modes (hands/head/ears/body/magic) + rituals registry ----
 // Idempotent — re-run safely on every startup. See schedule-tracker/CLAUDE.md and the
 // cc/daybot-core task brief for the "why" (KB/Skills retired, body+magic modes added).

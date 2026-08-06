@@ -158,6 +158,16 @@ function stringifyToken(token, value, data, format) {
   // still renders as an image, never as a bare path.
   if (token === 'header_image') return isTruthy(value) ? imageMarkup(String(value).trim(), format) : '';
   if (token === 'claude_comment') return format === 'html' ? claudeCommentToHtml(value) : claudeCommentToMd(value);
+  // joke_diagram now carries a markdown image `![alt](url)` (the jokediagram-whimsical
+  // subagent renders a PNG to the CDN, not a whimsical.com link). In md it passes through
+  // verbatim; in html the raw prose pass would escape it into literal text, so render a
+  // real <img> here (same treatment header_image gets). Non-image text still falls through.
+  if (token === 'joke_diagram' && isTruthy(value)) {
+    const m = String(value).trim().match(/^!\[([^\]]*)\]\(([^\s)]+)\)$/);
+    if (m) return format === 'html'
+      ? `<img class="day-img" src="${escapeHtml(m[2])}" loading="lazy" alt="${escapeHtml(m[1])}">`
+      : String(value).trim();
+  }
   if (Array.isArray(value)) return format === 'html' ? listToHtml(value) : listToMd(value);
   return String(value);
 }

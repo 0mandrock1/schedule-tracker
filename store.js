@@ -618,6 +618,36 @@ function decideDayItem(id, done, note) {
   return db.prepare('SELECT * FROM day_items WHERE id = ?').get(id);
 }
 
+// Assign (or clear, dueAt=null) a concrete clock time to an item. Expects a
+// tz-qualified ISO string (e.g. "2026-08-06T14:30:00+03:00") so the bot's
+// `new Date(due_at)` is unambiguous. Re-setting due_at clears notified_at so the
+// reminder re-arms for the new time; clearing it (null) disables the reminder.
+function setDayItemDueAt(id, dueAt) {
+  if (dueAt !== null) {
+    if (typeof dueAt !== 'string' || Number.isNaN(Date.parse(dueAt))) {
+      throw new Error('due_at must be a tz-qualified ISO datetime string, or null to clear');
+    }
+  }
+  const info = db.prepare('UPDATE day_items SET due_at = ?, notified_at = NULL WHERE id = ?').run(dueAt, id);
+  if (!info.changes) throw new Error('day item not found');
+  return db.prepare('SELECT * FROM day_items WHERE id = ?').get(id);
+}
+
+// Candidates for the timed-reminder poll: today's items that have a due_at and
+// haven't been pinged yet. The bot filters the [~13..15 min before] window client-side
+// (it knows "now"), then claims via claimDayItemReminder — same split as meetings.
+function dueDayItemsPending(day) {
+  return db.prepare('SELECT * FROM day_items WHERE day = ? AND due_at IS NOT NULL AND notified_at IS NULL').all(day);
+}
+
+// Atomic claim: stamps notified_at only if still unset. Returns true for the caller
+// that won the race, false for a duplicate poll — mirrors claimMeetingPing so a bot
+// restart straddling the reminder window can't double-ping.
+function claimDayItemReminder(id) {
+  const info = db.prepare("UPDATE day_items SET notified_at = datetime('now') WHERE id = ? AND notified_at IS NULL").run(id);
+  return info.changes > 0;
+}
+
 function getDayItem(id) {
   return db.prepare('SELECT * FROM day_items WHERE id = ?').get(id);
 }
@@ -745,6 +775,7 @@ module.exports = {
   pickParkedForReview, recordParkedReview,
   parkStaleProjects,
   generateDayItems, listDayItems, getDayItem, addDayItem, setDayItemSlot, decideDayItem,
+  setDayItemDueAt, dueDayItemsPending, claimDayItemReminder,
   habitsNudgeCheck, markHabitsNudgeSent, listFlags, clearFlag,
   claimMeetingPing,
   kyivToday,
