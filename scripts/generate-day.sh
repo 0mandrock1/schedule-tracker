@@ -59,15 +59,25 @@ ATTEMPT=1
 STATUS=1
 OUTPUT=""
 while :; do
-  OUTPUT="$(cd "$DIR" && claude -p "$PROMPT" --model sonnet --allowedTools "Bash Edit Write Read Glob Grep mcp__claude_ai_Google_Calendar mcp__claude_ai_Craft" < /dev/null 2>>"$DAYLOG")"
+  # 2>&1: claude prints the session-limit notice on stderr, so stdout-only capture
+  # missed it and burned all three retries on a wall we cannot get past.
+  OUTPUT="$(cd "$DIR" && claude -p "$PROMPT" --model sonnet --allowedTools "Bash Edit Write Read Glob Grep mcp__claude_ai_Google_Calendar mcp__claude_ai_Craft" < /dev/null 2>&1)"
   STATUS=$?
-  if [ "$STATUS" -eq 0 ] && ! echo "$OUTPUT" | grep -qiE '529|overloaded|rate limit|usage limit'; then break; fi
+  printf '%s\n' "$OUTPUT" >> "$DAYLOG"
+
+  # Session limit is NOT a task failure and retrying cannot help — the quota resets
+  # on its own clock. Bail out immediately with 75 (EX_TEMPFAIL = "try again later").
+  if printf '%s' "$OUTPUT" | grep -qiF 'hit your session limit'; then
+    echo "[generate-day] day=$DAY session limit reached — не помилка задачі, прийди пізніше (exit 75) $(date -Is)" | tee -a "$RUNLOG" >&2
+    exit 75
+  fi
+
+  if [ "$STATUS" -eq 0 ] && ! printf '%s' "$OUTPUT" | grep -qiE '529|overloaded|rate limit|usage limit'; then break; fi
   if [ "$ATTEMPT" -ge 3 ]; then break; fi
   echo "[generate-day] attempt $ATTEMPT failed (status=$STATUS), retrying in 60s" >> "$RUNLOG"
   ATTEMPT=$((ATTEMPT + 1))
   sleep 60
 done
-echo "$OUTPUT" >> "$DAYLOG"
 echo "[generate-day] exit=$STATUS $(date -Is)" >> "$RUNLOG"
 
 if [ "$STATUS" -ne 0 ]; then
