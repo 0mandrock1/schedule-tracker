@@ -354,13 +354,26 @@ app.get('/schedule-tracker-api/day-items', (req, res) => {
   res.json(store.listDayItems(day));
 });
 
+// Timed-reminder poll source: today's items with a due_at still awaiting a ping.
+// Static path — declared before PATCH `/day-items/:id` so `due` isn't read as an id.
+app.get('/schedule-tracker-api/day-items/due', (req, res) => {
+  const day = req.query.day || store.kyivToday();
+  res.json(store.dueDayItemsPending(day));
+});
+
+// Atomic dedup claim for the 15-min reminder (bot-side poll wins exactly once).
+app.post('/schedule-tracker-api/day-items/:id/reminder-claim', (req, res) => {
+  res.json({ claimed: store.claimDayItemReminder(req.params.id) });
+});
+
 app.patch('/schedule-tracker-api/day-items/:id', (req, res) => {
   try {
-    const { slot, done, note } = req.body || {};
+    const { slot, done, note, due_at } = req.body || {};
     let item;
     if (slot !== undefined) item = store.setDayItemSlot(req.params.id, slot);
     if (done !== undefined) item = store.decideDayItem(req.params.id, done, note);
-    if (!item) return res.status(400).json({ error: 'slot or done required' });
+    if (due_at !== undefined) item = store.setDayItemDueAt(req.params.id, due_at);
+    if (!item) return res.status(400).json({ error: 'slot, done or due_at required' });
     res.json(item);
   } catch (err) {
     res.status(400).json({ error: err.message });
