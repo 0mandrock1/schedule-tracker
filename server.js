@@ -2,6 +2,8 @@ require('dotenv').config({ path: require('path').join(__dirname, '.env'), quiet:
 const express = require('express');
 const path = require('path');
 const crypto = require('crypto');
+const fs = require('fs');
+const { execFile } = require('child_process');
 const { db, importLegacy } = require('./db');
 const { getEventsInRange, getMeetingsInRange, isMeeting } = require('./calendar');
 const pomodoro = require('./pomodoro');
@@ -25,6 +27,31 @@ const LOGIN_MAX_ATTEMPTS = 10;
 const app = express();
 app.set('trust proxy', 'loopback'); // nginx on the same host sets X-Forwarded-For
 app.use(express.json());
+
+// ---- device whitelist for the /day/ nginx Basic Auth (5feat P4) ----
+// Regenerate the nginx map include from the day_devices table, then test+reload nginx.
+// The map is consumed by an http-level `map $cookie_day_device $day_auth` block (in
+// /etc/nginx/conf.d/day-device-map.conf): a matching cookie => "off" disables
+// auth_basic for that browser; everything else falls to the default "day" realm.
+const DEVICE_MAP_FILE = '/etc/nginx/day-device-whitelist.map';
+function regenerateDeviceMap() {
+  return new Promise((resolve, reject) => {
+    const lines = store.listDeviceTokens().map((t) => `"${t}" "off";`);
+    const body = lines.length ? lines.join('\n') + '\n' : '# no whitelisted devices\n';
+    try {
+      fs.writeFileSync(DEVICE_MAP_FILE, body);
+    } catch (err) {
+      return reject(new Error(`write map failed: ${err.message}`));
+    }
+    execFile('nginx', ['-t'], (tErr, _o, tStderr) => {
+      if (tErr) return reject(new Error(`nginx -t failed: ${tStderr || tErr.message}`));
+      execFile('systemctl', ['reload', 'nginx'], (rErr, _ro, rStderr) => {
+        if (rErr) return reject(new Error(`nginx reload failed: ${rStderr || rErr.message}`));
+        resolve();
+      });
+    });
+  });
+}
 
 function parseCookies(req) {
   const header = req.headers.cookie;
@@ -388,6 +415,7 @@ app.patch('/schedule-tracker-api/day-items/:id', (req, res) => {
 function dayPlanJson(plan) {
   return {
     date: plan.day, mode: plan.mode, md: plan.md, html: plan.html,
+    theme_accent: plan.theme_accent || null,
     data: JSON.parse(plan.data_json || '{}'), generated_at: plan.generated_at,
   };
 }
@@ -397,6 +425,11 @@ app.get('/schedule-tracker-api/day-plan/latest', (req, res) => {
   const plan = store.getLatestDayPlan();
   if (!plan) return res.status(404).json({ error: 'no day plan saved yet' });
   res.json(dayPlanJson(plan));
+});
+
+// Same reason (must precede /day-plan/:date): first-full-push poll source (5feat P2).
+app.get('/schedule-tracker-api/day-plan/full-push-pending', (req, res) => {
+  res.json(store.dayFullPushPending(store.kyivToday()));
 });
 
 app.get('/schedule-tracker-api/day-plan/:date', (req, res) => {
@@ -425,6 +458,40 @@ app.post('/schedule-tracker-api/day-plan/:date/render', (req, res) => {
   const { md, warnings } = template.render(tpl.md, data);
   const html = template.renderHtml(tpl.md, data);
   res.json({ md, html, warnings });
+});
+
+// Re-render the latest (today's) day plan with the CURRENT template and WRITE it back
+// (unlike /day-plan/:date/render, which is preview-only). Same data/mode are kept —
+// saveDayPlan re-persists them unchanged, and theme_accent is preserved (COALESCE),
+// so regeneration never changes the colour or re-picks the mode within the day.
+app.post('/schedule-tracker-api/template/regenerate', (req, res) => {
+  const plan = store.getLatestDayPlan();
+  if (!plan || !plan.data_json) return res.status(404).json({ error: 'no stored day plan to regenerate' });
+  const tpl = store.getTemplate('day');
+  if (!tpl) return res.status(500).json({ error: 'template not found' });
+  try {
+    const data = JSON.parse(plan.data_json);
+    const { md, warnings } = template.render(tpl.md, data);
+    const html = template.renderHtml(tpl.md, data);
+    const saved = store.saveDayPlan(plan.day, { mode: plan.mode, md, html, data });
+    res.json({ ...dayPlanJson(saved), warnings });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Rituals that did NOT make it into today's day_items — the bot draws 2 at random
+// from here every ~2h (5feat P3). Read-only.
+app.get('/schedule-tracker-api/rituals/unscheduled', (req, res) => {
+  const day = req.query.day || store.kyivToday();
+  res.json(store.unscheduledRituals(day));
+});
+
+// First-full-push latch (5feat P2): the bot polls -pending; if pending it claims
+// atomically then sends the full plan md exactly once per day. (GET counterpart is
+// registered above /day-plan/:date so the literal path isn't read as a date.)
+app.post('/schedule-tracker-api/day-plan/full-push-claim', (req, res) => {
+  res.json({ claimed: store.claimDayFullPush(store.kyivToday()) });
 });
 
 app.get('/schedule-tracker-api/template', (req, res) => {
@@ -490,6 +557,26 @@ app.post('/schedule-tracker-api/meeting-ping-claim', (req, res) => {
   const { key } = req.body || {};
   if (!key) return res.status(400).json({ error: 'key required' });
   res.json({ claimed: store.claimMeetingPing(key) });
+});
+
+// ---- device whitelist register (5feat P4) ----
+// Called by a tiny inline JS in /day/index.html the first time a browser lands with a
+// valid Basic Auth but no day_device cookie. nginx already validated Basic Auth (and
+// injects the machine token, so requireAuth passes); we mint a device token, whitelist
+// it in the nginx map, and set it as a long-lived cookie so that browser stops being
+// prompted. X-Remote-User (set by nginx from Basic Auth) is stored only as a label.
+app.post('/schedule-tracker-api/device/register', async (req, res) => {
+  const label = req.get('x-remote-user') || null;
+  const token = store.registerDevice(label);
+  try {
+    await regenerateDeviceMap();
+  } catch (err) {
+    return res.status(500).json({ error: `device registered but nginx not reloaded: ${err.message}` });
+  }
+  res.cookie('day_device', token, {
+    path: '/', maxAge: 180 * 24 * 3600 * 1000, httpOnly: true, secure: true, sameSite: 'lax',
+  });
+  res.json({ ok: true });
 });
 
 // ---- compatibility routes kept from the Calendar era (paths only) ----

@@ -370,11 +370,30 @@ function pickMode(day) {
   return MODES[MODES.length - 1];
 }
 
+// ---- per-day accent colour (5feat P5) ----
+// Accent is an independent axis from `mode`: mode still drives the mode LABEL/badge,
+// but the page colour is a random daily accent. Names must match the CSS rules
+// (:root[data-accent=NAME]) hard-coded in /var/www/html/day/index.html — hex lives
+// there (frontend renders), the server only ever deals in these names.
+const ACCENTS = ['red', 'green', 'blue', 'pink-violet', 'malachite', 'octarine-1', 'octarine-2', 'octarine-3', 'vampire-werewolf'];
+
+// Picked once per day and stable: if the day already has an accent, keep it (so
+// regeneration/repeat PUT never re-rolls mid-day). Otherwise random from the pool
+// excluding yesterday's accent.
+function pickAccentForDay(day) {
+  const cur = db.prepare('SELECT theme_accent FROM day_plans WHERE day = ?').get(day);
+  if (cur && cur.theme_accent) return cur.theme_accent;
+  const yest = db.prepare('SELECT theme_accent FROM day_plans WHERE day = ?').get(shiftDayStr(day, -1));
+  const exclude = yest && yest.theme_accent ? yest.theme_accent : null;
+  const pool = ACCENTS.filter((a) => a !== exclude);
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
 function ensureDayPlanMode(day, mode) {
   db.prepare(`
-    INSERT INTO day_plans (day, mode, generated_at, source) VALUES (?, ?, datetime('now'), 'day-items')
+    INSERT INTO day_plans (day, mode, theme_accent, generated_at, source) VALUES (?, ?, ?, datetime('now'), 'day-items')
     ON CONFLICT(day) DO NOTHING
-  `).run(day, mode);
+  `).run(day, mode, pickAccentForDay(day));
 }
 
 // ---- calendar density (theme quota depends on how packed the day already is) ----
@@ -709,6 +728,48 @@ function claimMeetingPing(key) {
   return info.changes > 0;
 }
 
+// ---- unscheduled rituals (5feat P3) ----
+// Enabled rituals that did NOT land in today's day_items (source `ritual:<id>`). Uses
+// the persisted checklist rather than re-calling ritualsForDay so the random weekly
+// draw isn't re-rolled on every poll — this reflects what actually made the day.
+function unscheduledRituals(day) {
+  const scheduled = new Set(
+    db.prepare("SELECT source FROM day_items WHERE day = ? AND source LIKE 'ritual:%'").all(day)
+      .map((r) => Number(r.source.split(':')[1]))
+  );
+  return listRituals({ enabled: true }).filter((r) => !scheduled.has(r.id));
+}
+
+// ---- first full day-plan push latch (5feat P2) ----
+// One push of the full rendered plan per calendar day, fired by whichever write
+// (generate-day.sh OR /template/regenerate) first produces today's plan. Mirrors
+// claimMeetingPing: pending = today's plan has md and the latch isn't set yet; the
+// claim is atomic so a restart mid-poll can't double-send.
+function dayFullPushPending(day) {
+  const plan = getDayPlan(day);
+  if (!plan || plan.md == null) return { pending: false };
+  const fired = db.prepare('SELECT 1 FROM flags WHERE key = ?').get(`day_full_push:${day}`);
+  if (fired) return { pending: false };
+  return { pending: true, plan: { day: plan.day, mode: plan.mode, md: plan.md } };
+}
+
+function claimDayFullPush(day) {
+  const info = db.prepare("INSERT OR IGNORE INTO flags (key, fired_at) VALUES (?, datetime('now'))").run(`day_full_push:${day}`);
+  return info.changes > 0;
+}
+
+// ---- device whitelist (5feat P4) ----
+function registerDevice(label) {
+  const token = require('crypto').randomBytes(32).toString('hex');
+  db.prepare("INSERT INTO day_devices (token, created_at, last_seen_at, label) VALUES (?, datetime('now'), datetime('now'), ?)")
+    .run(token, label || null);
+  return token;
+}
+
+function listDeviceTokens() {
+  return db.prepare('SELECT token FROM day_devices ORDER BY created_at ASC').all().map((r) => r.token);
+}
+
 // ---- day_plans (rendered plan storage) ----
 
 function getDayPlan(day) {
@@ -724,13 +785,18 @@ function getLatestDayPlan() {
 // the same day; this fills in the rest without duplicating.
 function saveDayPlan(day, { mode, md, html, data }) {
   if (!MODES.includes(mode)) throw new Error('mode must be hands|head|ears|body|magic');
+  // theme_accent: COALESCE keeps whatever the day already had (ensureDayPlanMode or an
+  // earlier save may have set it) and only fills it from the fresh pick when still null.
+  // So /template/regenerate and repeat PUT the same day never re-roll the colour.
   db.prepare(`
-    INSERT INTO day_plans (day, mode, md, html, data_json, generated_at, source)
-    VALUES (?, ?, ?, ?, ?, datetime('now'), 'api')
+    INSERT INTO day_plans (day, mode, md, html, data_json, theme_accent, generated_at, source)
+    VALUES (?, ?, ?, ?, ?, ?, datetime('now'), 'api')
     ON CONFLICT(day) DO UPDATE SET
       mode = excluded.mode, md = excluded.md, html = excluded.html,
-      data_json = excluded.data_json, generated_at = datetime('now'), source = 'api'
-  `).run(day, mode, md ?? null, html ?? null, JSON.stringify(data ?? {}));
+      data_json = excluded.data_json,
+      theme_accent = COALESCE(day_plans.theme_accent, excluded.theme_accent),
+      generated_at = datetime('now'), source = 'api'
+  `).run(day, mode, md ?? null, html ?? null, JSON.stringify(data ?? {}), pickAccentForDay(day));
   return getDayPlan(day);
 }
 
@@ -778,6 +844,9 @@ module.exports = {
   setDayItemDueAt, dueDayItemsPending, claimDayItemReminder,
   habitsNudgeCheck, markHabitsNudgeSent, listFlags, clearFlag,
   claimMeetingPing,
+  unscheduledRituals, dayFullPushPending, claimDayFullPush,
+  registerDevice, listDeviceTokens,
+  ACCENTS, pickAccentForDay,
   kyivToday,
   pickMode, listRituals, ritualsForDay,
   countMeetingsForDay, themeQuotaForMeetingCount,
