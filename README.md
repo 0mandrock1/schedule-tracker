@@ -147,10 +147,49 @@ parking lot. `POST /dashboard-open` fires on load. No task editing, no minute-by
 
 | Script | What it does |
 |---|---|
-| `scripts/prep-day-run.sh [mode]` | On-demand prep-day generation via `claude -p`. One doc per Kyiv day (marker file), 3× retry on 529/overloaded. Prints the Craft URL. |
+| `scripts/generate-day.sh [YYYY-MM-DD] [--force]` | The day-plan generator (see below). Cron 07:30 Kyiv, one run per Kyiv day (marker file), 3× retry on 529/overloaded. `--force` bypasses the marker. |
+| `scripts/archive-day.sh [YYYY-MM-DD]` | Archives a day's rendered plan (`day_plans.md` + `day_items` completion marks) into a single Craft doc under `Archive/days` ("День — DD.MM.YYYY"). Cron 00:05 Kyiv, defaults to yesterday. Prints the Craft URL, or `NO PLAN FOR <day>` if that day was never generated. |
+| `scripts/prep-day-run.sh [mode\|YYYY-MM-DD]` | **Superseded 2026-08-06** by `generate-day.sh` — kept as a thin compat wrapper (`exec`s into it) so old callers (e.g. the bot's `/day` command) don't break. Mode selection is fully automatic now (`pickMode`), so a mode-shaped arg is silently ignored; a `YYYY-MM-DD` arg is passed through as the target day. No longer prints a Craft URL — the live plan lives on `mandrock-tools/day/`, not in Craft, during the day. |
 | `scripts/day-items-to-craft.sh [YYYY-MM-DD]` | Mirrors today's `day_items` into the "Заняття на день" section of the daily Craft doc. Idempotent, 3× retry. |
 | `scripts/verify.mjs` | System health check — all endpoints, bot cron registration, script presence + executable bit. `npm run verify`. |
 | `scripts/hash-password.js <password>` | Generates `SCHEDULE_PASS_HASH`. |
+
+## Day-plan generator (2026-08-06)
+
+`scripts/generate-day.sh` runs an internal `claude -p` agent
+(`config/generate-day-prompt.md`) that, for a given Kyiv day: builds today's
+`day_items` (via `POST /day-items/generate`), creates one Google Calendar event per
+item on the **`planer`** calendar (id
+`4d8cc9c43e8ed3eda1875b85f888c2157516c4e1e41cfbf142d0803288d8615b@group.calendar.google.com`,
+never the primary calendar) tagged with a `[daygen]` marker in the description for
+idempotent re-runs, and renders + saves the day's `day_plans` row (`PUT
+/day-plan/:date`) — magic/tarot block, space/news blurbs, a joke diagram (parallel
+`jokediagram-whimsical` subagent), a header image (`kek.py quote`), and the rotating
+"для смаку" block from `config/spice.json`.
+
+Scheduling inside the `planer` calendar is deterministic (seeded from the date, same
+`hashStr`+`mulberry32` approach as `store.js`'s `pickMode`), not random per run — two
+runs on the same day place tasks identically modulo whatever already changed in
+`day_items`/real meetings.
+
+Mode → header-image accent color mapping (dark variant from
+`/root/claude-config/skills/user/palette-themes/references/themes.json`):
+
+| mode | accent | hex |
+|---|---|---|
+| hands | blue | `4aa3e0` |
+| head | octarine-2 | `00f5d4` |
+| ears | pink-violet | `e06ec0` |
+| body | red | `ff5a4d` |
+| magic | octarine-3 | `e94aff` |
+
+`scripts/archive-day.sh` is the cold-storage counterpart — it copies a finished day's
+`day_plans.md` (with `day_items` done/skipped marks overlaid) into Craft
+(`Archive/days`) once per day, so the live page under `mandrock-tools/day/` doesn't
+need to keep every past day around.
+
+Cron: `/etc/cron.d/day-plan` (`CRON_TZ=Europe/Kyiv`) — `30 7 * * *` generate,
+`5 0 * * *` archive.
 
 ## Legacy data import
 

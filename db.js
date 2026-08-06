@@ -165,6 +165,22 @@ CREATE TABLE IF NOT EXISTS templates (
 const flagsCols = db.prepare('PRAGMA table_info(flags)').all().map(c => c.name);
 if (!flagsCols.includes('value')) db.exec('ALTER TABLE flags ADD COLUMN value TEXT');
 
+// ---- 2026-08-05 day_items idempotency fix: UNIQUE(day, title, kind) ----
+// generateDayItems() used to check "already generated?" before its one await
+// (countMeetingsForDay), so two concurrent calls for the same day could both pass
+// the check and both insert — duplicating the checklist. The index below is the
+// actual guard (paired with a transaction + INSERT OR IGNORE in store.js); dedupe
+// first because CREATE UNIQUE INDEX fails outright if exact duplicates already exist.
+const dupDayItemGroups = db.prepare(
+  'SELECT day, title, kind, MIN(id) as keepId FROM day_items GROUP BY day, title, kind HAVING COUNT(*) > 1'
+).all();
+if (dupDayItemGroups.length) {
+  const delDup = db.prepare('DELETE FROM day_items WHERE day = ? AND title = ? AND kind = ? AND id != ?');
+  const tx = db.transaction((groups) => { for (const g of groups) delDup.run(g.day, g.title, g.kind, g.keepId); });
+  tx(dupDayItemGroups);
+}
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_day_items_day_title_kind ON day_items(day, title, kind)');
+
 // ---- 2026-08-05 taxonomy rework: 5 modes (hands/head/ears/body/magic) + rituals registry ----
 // Idempotent — re-run safely on every startup. See schedule-tracker/CLAUDE.md and the
 // cc/daybot-core task brief for the "why" (KB/Skills retired, body+magic modes added).
