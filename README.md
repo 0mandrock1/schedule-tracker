@@ -150,7 +150,7 @@ parking lot. `POST /dashboard-open` fires on load. No task editing, no minute-by
 | `scripts/generate-day.sh [YYYY-MM-DD] [--force]` | The day-plan generator (see below). Cron 07:30 Kyiv, one run per Kyiv day (marker file), 3× retry on 529/overloaded. `--force` bypasses the marker. |
 | `scripts/archive-day.sh [YYYY-MM-DD]` | Archives a day's rendered plan (`day_plans.md` + `day_items` completion marks) into a single Craft doc under `Archive/days` ("День — DD.MM.YYYY"). Cron 00:05 Kyiv, defaults to yesterday. Prints the Craft URL, or `NO PLAN FOR <day>` if that day was never generated. |
 | `scripts/prep-day-run.sh [mode\|YYYY-MM-DD]` | **Superseded 2026-08-06** by `generate-day.sh` — kept as a thin compat wrapper (`exec`s into it) so old callers (e.g. the bot's `/day` command) don't break. Mode selection is fully automatic now (`pickMode`), so a mode-shaped arg is silently ignored; a `YYYY-MM-DD` arg is passed through as the target day. No longer prints a Craft URL — the live plan lives on `mandrock-tools/day/`, not in Craft, during the day. |
-| `scripts/day-items-to-craft.sh [YYYY-MM-DD]` | Mirrors today's `day_items` into the "Заняття на день" section of the daily Craft doc. Idempotent, 3× retry. |
+| `scripts/day-items-to-craft.sh [YYYY-MM-DD]` | **deprecated 2026-08-07: no Craft doc during the day any more, see prep-day-run.sh** — script removed, bot no longer calls it. (was: mirrors today's `day_items` into the "Заняття на день" section of the daily Craft doc.) |
 | `scripts/verify.mjs` | System health check — all endpoints, bot cron registration, script presence + executable bit. `npm run verify`. |
 | `scripts/hash-password.js <password>` | Generates `SCHEDULE_PASS_HASH`. |
 
